@@ -1,0 +1,252 @@
+{
+  "entities": {
+    "UserPublicProfile": {
+      "title": "UserPublicProfile",
+      "description": "Public profile metadata for a DEALKORO trader or admin without PII.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "avatarUrl": { "type": "string", "maxLength": 512 },
+        "level": { "type": "number" },
+        "rating": { "type": "number" },
+        "sellCount": { "type": "number" },
+        "buyCount": { "type": "number" },
+        "joinedLabel": { "type": "string", "maxLength": 32 },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "level", "rating", "sellCount", "buyCount", "joinedLabel", "role", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Strictly isolated PII (email, phone, preferred payout) for a user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "payoutMethod": { "type": "string", "enum": ["bKash", "Nagad"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "updatedAt"]
+    },
+    "AdminAgent": {
+      "title": "AdminAgent",
+      "description": "Verified DEALKORO escrow mediator profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "verified": { "type": "boolean" },
+        "reviewNotes": { "type": "string", "maxLength": 500 },
+        "completedDeals": { "type": "number" },
+        "rating": { "type": "number" }
+      },
+      "required": ["uid", "name", "verified", "reviewNotes", "completedDeals", "rating"]
+    },
+    "Listing": {
+      "title": "Listing",
+      "description": "Gaming account or digital item listing posted for sale.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sellerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sellerName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "category": { "type": "string", "enum": ["eFootball", "PUBG Mobile", "Free Fire", "Mobile Legends", "Other"] },
+        "title": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "imageUrl": { "type": "string", "maxLength": 512 },
+        "paidCount": { "type": "string", "maxLength": 32 },
+        "linkType": { "type": "string", "enum": ["Only Konami", "Konami + Glink", "Konami + iOSlink", "Gg Lost"] },
+        "server": { "type": "string", "maxLength": 60 },
+        "limitInfo": { "type": "string", "maxLength": 40 },
+        "price": { "type": "number" },
+        "rating": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "in_deal", "sold"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sellerId", "sellerName", "category", "title", "linkType", "price", "status", "createdAt", "updatedAt"]
+    },
+    "ListingComment": {
+      "title": "ListingComment",
+      "description": "Public comment on a listing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "listingId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "listingId", "authorId", "authorName", "text", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct buyer-seller negotiation thread.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "listingId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "buyerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sellerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "lastMessage": { "type": "string", "maxLength": 300 },
+        "negotiatedPrice": { "type": "number" },
+        "offerStatus": { "type": "string", "enum": ["none", "offered", "accepted", "declined"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "listingId", "buyerId", "sellerId", "offerStatus", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Message inside a direct conversation or admin deal chat.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 800 },
+        "type": { "type": "string", "enum": ["text", "offer", "system", "proof", "account_details"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "senderId", "senderName", "text", "type", "createdAt"]
+    },
+    "AdminDeal": {
+      "title": "AdminDeal",
+      "description": "Admin-mediated escrow deal with fees, payment methods, verification checks, and completion state.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "conversationId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "listingId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "buyerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sellerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "adminId": { "type": "string", "maxLength": 128 },
+        "agreedAmount": { "type": "number" },
+        "serviceType": { "type": "string", "enum": ["pending", "normal", "ultimate_safe"] },
+        "buyerMethod": { "type": "string", "enum": ["pending", "bKash", "Nagad"] },
+        "sellerMethod": { "type": "string", "enum": ["pending", "bKash", "Nagad"] },
+        "crossDealAccepted": { "type": "boolean" },
+        "iosCheck": { "type": "boolean" },
+        "googleBindCheck": { "type": "boolean" },
+        "totalAmount": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "confirming",
+            "finding_admin",
+            "service_select",
+            "payment_method",
+            "cross_deal",
+            "verification_checks",
+            "cost_summary",
+            "payment_instruction",
+            "payment_received",
+            "id_exchange",
+            "review_prompt",
+            "done",
+            "cancelled"
+          ]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "conversationId", "listingId", "buyerId", "sellerId", "agreedAmount", "status", "createdAt", "updatedAt"]
+    },
+    "DealReview": {
+      "title": "DealReview",
+      "description": "Post-deal user rating and written review.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dealId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reviewerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "dealId", "reviewerId", "rating", "comment", "createdAt"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "Activity notification for a specific recipient user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "recipientId", "actorName", "message", "isRead", "createdAt"]
+    },
+    "StatementEntry": {
+      "title": "StatementEntry",
+      "description": "User financial ledger entry for buys, sells, and admin deal mediation income.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dealId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "type": { "type": "string", "enum": ["sell_income", "buy_payment", "admin_fee_income"] },
+        "amount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "dealId", "title", "type", "amount", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublicProfile" },
+      "description": "Public user profile counters and display name."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Private PII isolated to account owner and admins."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminAgent" },
+      "description": "Verified admin escrow mediators."
+    },
+    "/listings/{listingId}": {
+      "schema": { "$ref": "#/entities/Listing" },
+      "description": "Public marketplace listings."
+    },
+    "/listings/{listingId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/ListingComment" },
+      "description": "Comments under a listing."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Direct buyer-seller negotiation conversations."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages inside a buyer-seller conversation."
+    },
+    "/deals/{dealId}": {
+      "schema": { "$ref": "#/entities/AdminDeal" },
+      "description": "Admin-mediated escrow deals."
+    },
+    "/deals/{dealId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Automated group chat messages in a deal room."
+    },
+    "/deals/{dealId}/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/DealReview" },
+      "description": "Completed deal ratings and reviews."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "Per-user notifications."
+    },
+    "/statements/{statementId}": {
+      "schema": { "$ref": "#/entities/StatementEntry" },
+      "description": "Per-user transaction and income statement entries."
+    }
+  }
+}

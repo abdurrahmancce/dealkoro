@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.DS_Store
+.playwright-cli/
+.gradle/
+.kotlin/
+/build/
+/app/build/
+/.build-outputs/
+debug.keystore
+debug.keystore.base64
+local.properties

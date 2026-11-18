@@ -1,0 +1,6 @@
+{
+  "name": "DEALKORO",
+  "description": "Trusted escrow-mediated marketplace to buy and sell gaming accounts safely with live chat negotiation, verified admin mediation, bKash/Nagad settlement, and EN/BN support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

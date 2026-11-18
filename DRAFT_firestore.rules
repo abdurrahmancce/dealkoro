@@ -1,0 +1,359 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'akash.abdur.2002@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidUserPublic(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'level', 'rating', 'sellCount', 'buyCount', 'joinedLabel', 'role', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'avatarUrl', 'level', 'rating', 'sellCount', 'buyCount', 'joinedLabel', 'role', 'updatedAt'])
+        && data.uid == userId
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 512))
+        && data.level is number && data.level >= 1 && data.level <= 100
+        && data.rating is number && data.rating >= 0 && data.rating <= 5
+        && data.sellCount is number && data.sellCount >= 0
+        && data.buyCount is number && data.buyCount >= 0
+        && data.joinedLabel is string && data.joinedLabel.size() <= 32
+        && data.role in ['user', 'admin']
+        && data.updatedAt == request.time;
+    }
+
+    function isValidUserPrivate(data, userId) {
+      return data.keys().hasAll(['uid', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'phone', 'payoutMethod', 'updatedAt'])
+        && data.uid == userId
+        && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 32))
+        && (!('payoutMethod' in data) || (data.payoutMethod in ['bKash', 'Nagad']))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidListing(data, listingId) {
+      return data.keys().hasAll(['id', 'sellerId', 'sellerName', 'category', 'title', 'linkType', 'price', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'sellerId', 'sellerName', 'category', 'title', 'description', 'imageUrl', 'paidCount', 'linkType', 'server', 'limitInfo', 'price', 'rating', 'status', 'createdAt', 'updatedAt'])
+        && data.id == listingId
+        && isValidId(data.sellerId)
+        && data.sellerName is string && data.sellerName.size() >= 1 && data.sellerName.size() <= 80
+        && data.category in ['eFootball', 'PUBG Mobile', 'Free Fire', 'Mobile Legends', 'Other']
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 512))
+        && (!('paidCount' in data) || (data.paidCount is string && data.paidCount.size() <= 32))
+        && data.linkType in ['Only Konami', 'Konami + Glink', 'Konami + iOSlink', 'Gg Lost']
+        && (!('server' in data) || (data.server is string && data.server.size() <= 60))
+        && (!('limitInfo' in data) || (data.limitInfo is string && data.limitInfo.size() <= 40))
+        && data.price is number && data.price >= 0 && data.price <= 1000000
+        && (!('rating' in data) || (data.rating is number && data.rating >= 0 && data.rating <= 5))
+        && data.status in ['active', 'in_deal', 'sold']
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidComment(data, commentId, listingId) {
+      return data.keys().hasAll(['id', 'listingId', 'authorId', 'authorName', 'text', 'createdAt'])
+        && data.keys().hasOnly(['id', 'listingId', 'authorId', 'authorName', 'text', 'createdAt'])
+        && data.id == commentId
+        && data.listingId == listingId
+        && data.authorId == request.auth.uid
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 500
+        && data.createdAt == request.time;
+    }
+
+    function isValidConversation(data, convId) {
+      return data.keys().hasAll(['id', 'listingId', 'buyerId', 'sellerId', 'offerStatus', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'listingId', 'listingTitle', 'listingPrice', 'listingImage', 'buyerId', 'buyerName', 'sellerId', 'sellerName', 'lastMessage', 'negotiatedPrice', 'offerStatus', 'dealId', 'updatedAt'])
+        && data.id == convId
+        && isValidId(data.listingId)
+        && isValidId(data.buyerId)
+        && isValidId(data.sellerId)
+        && (!('listingTitle' in data) || (data.listingTitle is string && data.listingTitle.size() <= 120))
+        && (!('listingPrice' in data) || (data.listingPrice is number && data.listingPrice >= 0))
+        && (!('listingImage' in data) || (data.listingImage is string && data.listingImage.size() <= 512))
+        && (!('buyerName' in data) || (data.buyerName is string && data.buyerName.size() <= 80))
+        && (!('sellerName' in data) || (data.sellerName is string && data.sellerName.size() <= 80))
+        && (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() <= 300))
+        && (!('negotiatedPrice' in data) || (data.negotiatedPrice is number && data.negotiatedPrice >= 0))
+        && data.offerStatus in ['none', 'offered', 'accepted', 'declined']
+        && (!('dealId' in data) || (data.dealId is string && data.dealId.size() <= 128))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidMessage(data, msgId) {
+      return data.keys().hasAll(['id', 'senderId', 'senderName', 'text', 'type', 'createdAt'])
+        && data.keys().hasOnly(['id', 'senderId', 'senderName', 'text', 'type', 'offerAmount', 'createdAt'])
+        && data.id == msgId
+        && data.senderId == request.auth.uid
+        && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 800
+        && data.type in ['text', 'offer', 'system', 'proof', 'account_details']
+        && (!('offerAmount' in data) || (data.offerAmount is number && data.offerAmount >= 0))
+        && data.createdAt == request.time;
+    }
+
+    function isValidDeal(data, dealId) {
+      return data.keys().hasAll(['id', 'conversationId', 'listingId', 'buyerId', 'sellerId', 'agreedAmount', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'conversationId', 'listingId', 'listingTitle', 'listingImage', 'buyerId', 'buyerName', 'sellerId', 'sellerName', 'adminId', 'adminName', 'agreedAmount', 'serviceType', 'serviceFee', 'buyerMethod', 'sellerMethod', 'crossDealAccepted', 'crossDealFee', 'iosCheck', 'googleBindCheck', 'verificationFee', 'totalAmount', 'paymentContact', 'paymentProofUrl', 'buyerInitialDone', 'sellerExchanged', 'accountDetailsNote', 'status', 'createdAt', 'updatedAt'])
+        && data.id == dealId
+        && isValidId(data.conversationId)
+        && isValidId(data.listingId)
+        && isValidId(data.buyerId)
+        && isValidId(data.sellerId)
+        && (!('adminId' in data) || (data.adminId is string && data.adminId.size() <= 128))
+        && data.agreedAmount is number && data.agreedAmount >= 0 && data.agreedAmount <= 1000000
+        && (!('serviceType' in data) || (data.serviceType in ['pending', 'normal', 'ultimate_safe']))
+        && (!('buyerMethod' in data) || (data.buyerMethod in ['pending', 'bKash', 'Nagad']))
+        && (!('sellerMethod' in data) || (data.sellerMethod in ['pending', 'bKash', 'Nagad']))
+        && (!('totalAmount' in data) || (data.totalAmount is number && data.totalAmount >= 0))
+        && data.status in ['confirming', 'finding_admin', 'service_select', 'payment_method', 'cross_deal', 'verification_checks', 'cost_summary', 'payment_instruction', 'payment_received', 'id_exchange', 'review_prompt', 'done', 'cancelled']
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidReview(data, reviewId, dealId) {
+      return data.keys().hasAll(['id', 'dealId', 'reviewerId', 'rating', 'comment', 'createdAt'])
+        && data.keys().hasOnly(['id', 'dealId', 'reviewerId', 'reviewerName', 'targetAdminName', 'rating', 'comment', 'createdAt'])
+        && data.id == reviewId
+        && data.dealId == dealId
+        && data.reviewerId == request.auth.uid
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() >= 1 && data.comment.size() <= 500
+        && data.createdAt == request.time;
+    }
+
+    function isValidNotification(data, notifId) {
+      return data.keys().hasAll(['id', 'recipientId', 'actorName', 'message', 'isRead', 'createdAt'])
+        && data.keys().hasOnly(['id', 'recipientId', 'actorName', 'message', 'targetType', 'targetId', 'isRead', 'createdAt'])
+        && data.id == notifId
+        && isValidId(data.recipientId)
+        && data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 80
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 240
+        && data.isRead is bool
+        && data.createdAt == request.time;
+    }
+
+    function isValidStatement(data, stmtId) {
+      return data.keys().hasAll(['id', 'userId', 'dealId', 'title', 'type', 'amount', 'createdAt'])
+        && data.keys().hasOnly(['id', 'userId', 'dealId', 'title', 'type', 'amount', 'feeAmount', 'netAmount', 'method', 'createdAt'])
+        && data.id == stmtId
+        && data.userId == request.auth.uid
+        && isValidId(data.dealId)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.type in ['sell_income', 'buy_payment', 'admin_fee_income']
+        && data.amount is number && data.amount >= 0
+        && data.createdAt == request.time;
+    }
+
+    // Users public & isolated private PII
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isValidId(userId)
+        && isVerifiedUser()
+        && isOwner(userId)
+        && isValidUserPublic(incoming(), userId)
+        && incoming().role == 'user';
+      allow update: if isValidId(userId)
+        && isValidUserPublic(incoming(), userId)
+        && (
+          isAdmin() ||
+          (isVerifiedUser() && isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatarUrl', 'updatedAt']))
+        );
+      allow delete: if isAdmin();
+
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
+        allow list: if isOwner(userId) || isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(docId) && isVerifiedUser() && (isOwner(userId) || isAdmin()) && isValidUserPrivate(incoming(), userId);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Verified admin mediators
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create, update, delete: if isValidId(adminId) && isAdmin();
+    }
+
+    // Public marketplace listings
+    match /listings/{listingId} {
+      allow get: if isValidId(listingId);
+      allow list: if resource.data.status in ['active', 'in_deal', 'sold'];
+      allow create: if isValidId(listingId)
+        && isVerifiedUser()
+        && isValidListing(incoming(), listingId)
+        && incoming().sellerId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(listingId)
+        && isValidListing(incoming(), listingId)
+        && incoming().sellerId == existing().sellerId
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          (isVerifiedUser() && existing().sellerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'status', 'updatedAt']))
+        );
+      allow delete: if isValidId(listingId) && (isAdmin() || (isVerifiedUser() && existing().sellerId == request.auth.uid));
+
+      match /comments/{commentId} {
+        allow get: if isValidId(listingId) && isValidId(commentId);
+        allow list: if resource.data.listingId == listingId;
+        allow create: if isValidId(listingId)
+          && isValidId(commentId)
+          && isVerifiedUser()
+          && exists(/databases/$(database)/documents/listings/$(listingId))
+          && isValidComment(incoming(), commentId, listingId);
+        allow delete: if isValidId(listingId) && isValidId(commentId) && (isAdmin() || (isVerifiedUser() && existing().authorId == request.auth.uid));
+      }
+    }
+
+    // Direct buyer-seller conversations
+    match /conversations/{conversationId} {
+      function isConvMember(conv) {
+        return isSignedIn() && (request.auth.uid == conv.buyerId || request.auth.uid == conv.sellerId);
+      }
+
+      allow get: if isValidId(conversationId) && (isConvMember(existing()) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid);
+      allow create: if isValidId(conversationId)
+        && isVerifiedUser()
+        && isValidConversation(incoming(), conversationId)
+        && (incoming().buyerId == request.auth.uid || incoming().sellerId == request.auth.uid)
+        && exists(/databases/$(database)/documents/listings/$(incoming().listingId));
+      allow update: if isValidId(conversationId)
+        && isValidConversation(incoming(), conversationId)
+        && incoming().buyerId == existing().buyerId
+        && incoming().sellerId == existing().sellerId
+        && incoming().listingId == existing().listingId
+        && (
+          isAdmin() ||
+          (isVerifiedUser() && isConvMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'negotiatedPrice', 'offerStatus', 'dealId', 'updatedAt']))
+        );
+
+      match /messages/{messageId} {
+        function parentConv() {
+          return get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+        }
+
+        allow get: if isValidId(conversationId) && isValidId(messageId) && (isConvMember(parentConv()) || isAdmin());
+        allow list: if isSignedIn() && (isConvMember(parentConv()) || isAdmin());
+        allow create: if isValidId(conversationId)
+          && isValidId(messageId)
+          && isVerifiedUser()
+          && isConvMember(parentConv())
+          && isValidMessage(incoming(), messageId);
+      }
+    }
+
+    // Admin-mediated escrow deals
+    match /deals/{dealId} {
+      function isDealParticipant(d) {
+        return isSignedIn() && (request.auth.uid == d.buyerId || request.auth.uid == d.sellerId || request.auth.uid == d.adminId);
+      }
+
+      allow get: if isValidId(dealId) && (isDealParticipant(existing()) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || resource.data.adminId == request.auth.uid);
+      allow create: if isValidId(dealId)
+        && isVerifiedUser()
+        && isValidDeal(incoming(), dealId)
+        && (incoming().buyerId == request.auth.uid || incoming().sellerId == request.auth.uid)
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(dealId)
+        && isValidDeal(incoming(), dealId)
+        && incoming().buyerId == existing().buyerId
+        && incoming().sellerId == existing().sellerId
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          (
+            isVerifiedUser()
+            && isDealParticipant(existing())
+            && !(existing().status in ['done', 'cancelled'])
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'adminId', 'adminName', 'serviceType', 'serviceFee', 'buyerMethod', 'sellerMethod',
+              'crossDealAccepted', 'crossDealFee', 'iosCheck', 'googleBindCheck', 'verificationFee',
+              'totalAmount', 'paymentProofUrl', 'buyerInitialDone', 'sellerExchanged',
+              'accountDetailsNote', 'status', 'updatedAt'
+            ])
+          )
+        );
+
+      match /messages/{messageId} {
+        function parentDeal() {
+          return get(/databases/$(database)/documents/deals/$(dealId)).data;
+        }
+
+        allow get: if isValidId(dealId) && isValidId(messageId) && (isDealParticipant(parentDeal()) || isAdmin());
+        allow list: if isSignedIn() && (isDealParticipant(parentDeal()) || isAdmin());
+        allow create: if isValidId(dealId)
+          && isValidId(messageId)
+          && isVerifiedUser()
+          && isDealParticipant(parentDeal())
+          && isValidMessage(incoming(), messageId);
+      }
+
+      match /reviews/{reviewId} {
+        function parentDealRev() {
+          return get(/databases/$(database)/documents/deals/$(dealId)).data;
+        }
+
+        allow get: if isValidId(dealId) && isValidId(reviewId);
+        allow list: if resource.data.dealId == dealId;
+        allow create: if isValidId(dealId)
+          && isValidId(reviewId)
+          && isVerifiedUser()
+          && (request.auth.uid == parentDealRev().buyerId || request.auth.uid == parentDealRev().sellerId)
+          && isValidReview(incoming(), reviewId, dealId);
+      }
+    }
+
+    // Notifications (strictly recipient-scoped)
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && isSignedIn() && (existing().recipientId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow create: if isValidId(notificationId) && isVerifiedUser() && isValidNotification(incoming(), notificationId);
+      allow update: if isValidId(notificationId) && isVerifiedUser() && existing().recipientId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+    }
+
+    // Financial statements (strictly user-scoped)
+    match /statements/{statementId} {
+      allow get: if isValidId(statementId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isValidId(statementId) && isVerifiedUser() && isValidStatement(incoming(), statementId);
+    }
+  }
+}
