@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ArrowLeft,
   Bell,
   Bookmark,
   FileText,
@@ -9,25 +10,28 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  Moon,
   PlusSquare,
   Search,
   Settings,
   Shield,
+  Sun,
   User,
   X,
-  ArrowLeft,
 } from 'lucide-react';
-import type { AppRoute, Language, UserProfile } from '../types/dealkoro';
+import type { AppRoute, Language, ThemeMode, UserProfile } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { ResilientImage } from './ResilientImage';
 
 interface AppShellProps {
   user: UserProfile;
   language: Language;
+  theme: ThemeMode;
   route: AppRoute;
   unreadNotifications: number;
   unreadMessages: number;
   drawerOpen: boolean;
+  onToggleTheme: (next?: ThemeMode) => void;
   onOpenDrawer: () => void;
   onCloseDrawer: () => void;
   onNavigate: (route: AppRoute) => void;
@@ -40,10 +44,12 @@ interface AppShellProps {
 export function AppShell({
   user,
   language,
+  theme,
   route,
   unreadNotifications,
   unreadMessages,
   drawerOpen,
+  onToggleTheme,
   onOpenDrawer,
   onCloseDrawer,
   onNavigate,
@@ -120,18 +126,18 @@ export function AppShell({
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
-      {/* Desktop Persistent Sidebar (prevents desert-island layout on 1440px) */}
-      <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 bg-white border-r border-slate-200 z-30">
-        <div className="h-16 px-5 flex items-center justify-between border-b border-slate-100">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col lg:flex-row transition-colors">
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-30 transition-colors">
+        <div className="h-16 px-5 flex items-center justify-between border-b border-slate-100 dark:border-slate-800">
           <button
             type="button"
             onClick={() => onNavigate({ screen: 'home' })}
-            className="text-xl font-extrabold tracking-tight text-slate-900 whitespace-nowrap"
+            className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap"
           >
-            DEAL<span className="text-blue-600">KORO</span>
+            DEAL<span className="text-blue-600 dark:text-blue-400">KORO</span>
           </button>
-          <span className="text-xs font-medium text-slate-400 tabular-nums">
+          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 tabular-nums">
             {user.role === 'admin' ? 'Admin' : `Lv.${user.level}`}
           </span>
         </div>
@@ -140,9 +146,9 @@ export function AppShell({
         <button
           type="button"
           onClick={() => onNavigate({ screen: 'profile' })}
-          className="m-4 p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors flex items-center gap-3 text-left"
+          className="m-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center gap-3 text-left"
         >
-          <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+          <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold shrink-0">
             {user.avatarUrl ? (
               <ResilientImage
                 src={user.avatarUrl}
@@ -154,10 +160,10 @@ export function AppShell({
             )}
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900 truncate">
+            <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
               {user.displayName}
             </div>
-            <div className="text-xs text-slate-500 truncate">
+            <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
               {user.sellCount} {t(language, 'sellStat')} · {user.buyCount}{' '}
               {t(language, 'buyStat')}
             </div>
@@ -229,8 +235,8 @@ export function AppShell({
               onClick={item.onClick}
               className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl text-sm font-medium flex items-center justify-between transition-colors ${
                 item.active
-                  ? 'bg-blue-50 text-blue-700 font-semibold'
-                  : 'text-slate-700 hover:bg-slate-100'
+                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               <span className="flex items-center gap-3 whitespace-nowrap">
@@ -238,44 +244,64 @@ export function AppShell({
                 <span>{item.label}</span>
               </span>
               {item.badge ? (
-                <span className="text-xs font-bold tabular-nums text-blue-600">
+                <span className="text-xs font-bold tabular-nums text-blue-600 dark:text-blue-400">
                   {item.badge}
                 </span>
               ) : null}
             </button>
           ))}
 
-          <div className="pt-4 mt-4 border-t border-slate-100 space-y-1">
+          <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 space-y-1">
             {drawerItems
-              .filter((item) => item.label !== t(language, 'home') && item.label !== t(language, 'adminDashboard'))
+              .filter(
+                (item) =>
+                  item.label !== t(language, 'home') &&
+                  item.label !== t(language, 'adminDashboard')
+              )
               .map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={item.action}
-                className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors ${
-                  item.active
-                    ? 'bg-blue-50 text-blue-700 font-semibold'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`}
-              >
-                {item.icon}
-                <span className="whitespace-nowrap">{item.label}</span>
-              </button>
-            ))}
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={item.action}
+                  className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors ${
+                    item.active
+                      ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {item.icon}
+                  <span className="whitespace-nowrap">{item.label}</span>
+                </button>
+              ))}
           </div>
         </nav>
 
-        <div className="p-4 border-t border-slate-100 space-y-2">
+        <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+          <button
+            type="button"
+            onClick={() => onToggleTheme()}
+            className="w-full min-h-[42px] px-3.5 py-2 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between transition-colors"
+          >
+            <span className="flex items-center gap-3">
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-slate-600" />
+              )}
+              <span>{theme === 'dark' ? t(language, 'lightMode') : t(language, 'darkMode')}</span>
+            </span>
+            <span className="text-[11px] font-semibold text-slate-400 uppercase">{theme}</span>
+          </button>
+
           <button
             type="button"
             onClick={onLogout}
-            className="w-full min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+            className="w-full min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-3 transition-colors"
           >
             <LogOut className="w-4 h-4" />
             <span>{t(language, 'logout')}</span>
           </button>
-          <div className="px-3.5 text-xs text-slate-400">
+          <div className="px-3.5 text-xs text-slate-400 dark:text-slate-500">
             {t(language, 'appVersion')}
           </div>
         </div>
@@ -284,14 +310,14 @@ export function AppShell({
       {/* Main Content Area */}
       <div className="flex-1 lg:pl-64 flex flex-col min-h-screen">
         {/* Top Bar (Mobile + Desktop unified compact header) */}
-        <header className="sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-4">
+        <header className="sticky top-0 z-30 h-14 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 flex items-center justify-between gap-4 transition-colors">
           <div className="flex items-center gap-2 min-w-0">
             {onBack ? (
               <button
                 type="button"
                 onClick={onBack}
                 aria-label="Go back"
-                className="min-w-[44px] min-h-[44px] -ml-2 flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 transition-colors"
+                className="min-w-[44px] min-h-[44px] -ml-2 flex items-center justify-center rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
@@ -300,7 +326,7 @@ export function AppShell({
                 type="button"
                 onClick={onOpenDrawer}
                 aria-label="Open navigation menu"
-                className="lg:hidden min-w-[44px] min-h-[44px] -ml-2 flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 transition-colors"
+                className="lg:hidden min-w-[44px] min-h-[44px] -ml-2 flex items-center justify-center rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 <Menu className="w-5 h-5" />
               </button>
@@ -309,13 +335,13 @@ export function AppShell({
             <button
               type="button"
               onClick={() => onNavigate({ screen: 'home' })}
-              className="text-lg font-extrabold tracking-tight text-slate-900 whitespace-nowrap truncate"
+              className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap truncate"
             >
               {headerTitle ? (
                 headerTitle
               ) : (
                 <>
-                  DEAL<span className="text-blue-600">KORO</span>
+                  DEAL<span className="text-blue-600 dark:text-blue-400">KORO</span>
                 </>
               )}
             </button>
@@ -324,9 +350,23 @@ export function AppShell({
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
+              onClick={() => onToggleTheme()}
+              data-testid="theme-toggle-btn"
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={theme === 'dark' ? t(language, 'lightMode') : t(language, 'darkMode')}
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-5 h-5 text-amber-400" />
+              ) : (
+                <Moon className="w-5 h-5" />
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => onNavigate({ screen: 'search' })}
               aria-label={t(language, 'search')}
-              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 transition-colors"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               <Search className="w-5 h-5" />
             </button>
@@ -334,7 +374,7 @@ export function AppShell({
               type="button"
               onClick={() => onNavigate({ screen: 'notifications' })}
               aria-label={t(language, 'notifications')}
-              className="relative min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 transition-colors"
+              className="relative min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               <Bell className="w-5 h-5" />
               {unreadNotifications > 0 && (
@@ -352,24 +392,29 @@ export function AppShell({
         </main>
       </div>
 
-      {/* Screen 03: Mobile Slide-Over Navigation Drawer */}
+      {/* Mobile Slide-Over Navigation Drawer */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation drawer">
+        <div
+          className="fixed inset-0 z-50 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation drawer"
+        >
           <div
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs"
+            className="fixed inset-0 bg-slate-900/50 dark:bg-slate-950/75 backdrop-blur-xs"
             onClick={onCloseDrawer}
           />
-          <div className="relative w-72 max-w-[82vw] h-full bg-white shadow-xl flex flex-col justify-between p-5 z-10">
+          <div className="relative w-72 max-w-[82vw] h-full bg-white dark:bg-slate-900 shadow-xl flex flex-col justify-between p-5 z-10 border-r border-slate-200 dark:border-slate-800">
             <div>
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <span className="text-lg font-extrabold tracking-tight text-slate-900">
-                  DEALKORO
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+                <span className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
+                  DEAL<span className="text-blue-600 dark:text-blue-400">KORO</span>
                 </span>
                 <button
                   type="button"
                   onClick={onCloseDrawer}
                   aria-label="Close navigation menu"
-                  className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+                  className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -381,9 +426,9 @@ export function AppShell({
                   onNavigate({ screen: 'profile' });
                   onCloseDrawer();
                 }}
-                className="w-full mt-4 p-3 bg-slate-50 rounded-xl flex items-center gap-3 text-left"
+                className="w-full mt-4 p-3 bg-slate-50 dark:bg-slate-800/70 rounded-xl flex items-center gap-3 text-left"
               >
-                <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+                <div className="w-10 h-10 rounded-full overflow-hidden bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold shrink-0">
                   {user.avatarUrl ? (
                     <ResilientImage
                       src={user.avatarUrl}
@@ -395,10 +440,12 @@ export function AppShell({
                   )}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 truncate">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                     {user.displayName}
                   </div>
-                  <div className="text-xs text-slate-500 truncate">{user.email}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    {user.email}
+                  </div>
                 </div>
               </button>
 
@@ -413,8 +460,8 @@ export function AppShell({
                     }}
                     className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors ${
                       item.active
-                        ? 'bg-blue-50 text-blue-700 font-semibold'
-                        : 'text-slate-700 hover:bg-slate-100'
+                        ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
                     {item.icon}
@@ -424,11 +471,31 @@ export function AppShell({
 
                 <button
                   type="button"
+                  onClick={() => onToggleTheme()}
+                  className="w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-3">
+                    {theme === 'dark' ? (
+                      <Sun className="w-4 h-4 text-amber-400" />
+                    ) : (
+                      <Moon className="w-4 h-4" />
+                    )}
+                    <span>
+                      {theme === 'dark' ? t(language, 'lightMode') : t(language, 'darkMode')}
+                    </span>
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase">
+                    {theme}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     onCloseDrawer();
                     onLogout();
                   }}
-                  className="w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                  className="w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-3 transition-colors"
                 >
                   <LogOut className="w-4 h-4" />
                   <span>{t(language, 'logout')}</span>
@@ -436,17 +503,17 @@ export function AppShell({
               </nav>
             </div>
 
-            <div className="pt-4 border-t border-slate-100 text-xs text-slate-400">
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400 dark:text-slate-500">
               {t(language, 'appVersion')}
             </div>
           </div>
         </div>
       )}
 
-      {/* Mobile Fixed 5-Tab Bottom Navigation Bar (Profile, Post, Home, Admin, Message) */}
+      {/* Mobile Fixed 5-Tab Bottom Navigation Bar */}
       <nav
         aria-label="Bottom navigation"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-5 items-center"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 grid grid-cols-5 items-center transition-colors"
       >
         {[
           {
@@ -494,7 +561,9 @@ export function AppShell({
             type="button"
             onClick={tab.onClick}
             className={`relative h-full flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
-              tab.active ? 'text-blue-600 bg-blue-50/70 font-semibold' : 'text-slate-600'
+              tab.active
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/70 dark:bg-blue-950/50 font-semibold'
+                : 'text-slate-600 dark:text-slate-400'
             }`}
           >
             <span className="relative">

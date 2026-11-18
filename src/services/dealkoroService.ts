@@ -1,7 +1,9 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -31,6 +33,7 @@ import type {
   PaymentMethod,
   PlatformEscrowConfig,
   StatementEntry,
+  ThemeMode,
   UserProfile,
 } from '../types/dealkoro';
 import {
@@ -125,6 +128,36 @@ export function saveLocalPreferences(language: Language, bookmarks: string[]): v
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ language, bookmarks }));
   } catch {
     // Ignore storage quota errors
+  }
+}
+
+const THEME_KEY = 'dealkoro_theme';
+
+export function getInitialTheme(): ThemeMode {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'dark' || saved === 'light') return saved;
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    ) {
+      return 'dark';
+    }
+  } catch {
+    // Ignore storage access failures
+  }
+  return 'light';
+}
+
+export function saveThemePreference(theme: ThemeMode): void {
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // Ignore storage access failures
+  }
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
   }
 }
 
@@ -292,9 +325,6 @@ export async function resolveUserProfileFromFirebase(
       sellCount = Number(d.sellCount ?? sellCount);
       buyCount = Number(d.buyCount ?? buyCount);
       joinedLabel = String(d.joinedLabel || joinedLabel);
-      if (d.role === 'admin') {
-        isAdmin = true;
-      }
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `users/${uid}`);
@@ -367,6 +397,15 @@ export async function syncFirebaseUserProfile(user: UserProfile): Promise<void> 
 
 export async function ensureVerifiedAdminsInFirestore(user: UserProfile): Promise<void> {
   if (!auth.currentUser || user.role !== 'admin') return;
+  try {
+    const existingSnap = await getDocs(collection(db, 'admins'));
+    if (!existingSnap.empty) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
   for (const agent of SEED_ADMINS) {
     const path = `admins/${agent.uid}`;
     try {
@@ -436,6 +475,17 @@ export async function persistAdminAgentToFirestore(agent: AdminAgent): Promise<v
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteAdminAgentFromFirestore(adminUid: string): Promise<void> {
+  if (!auth.currentUser) return;
+  const uid = sanitizeId(adminUid);
+  const path = `admins/${uid}`;
+  try {
+    await deleteDoc(doc(db, 'admins', uid));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
@@ -525,6 +575,17 @@ export async function updateListingStatusInFirestore(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteListingFromFirestore(listingId: string): Promise<void> {
+  if (!auth.currentUser) return;
+  const id = sanitizeId(listingId);
+  const path = `listings/${id}`;
+  try {
+    await deleteDoc(doc(db, 'listings', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 

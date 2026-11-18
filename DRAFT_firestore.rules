@@ -281,7 +281,8 @@ service cloud.firestore {
     match /admins/{adminId} {
       allow get: if isValidId(adminId) && isSignedIn();
       allow list: if isSignedIn();
-      allow create, update, delete: if isValidId(adminId) && isAdmin() && isValidAdminAgent(incoming(), adminId);
+      allow create, update: if isValidId(adminId) && isAdmin() && isValidAdminAgent(incoming(), adminId);
+      allow delete: if isValidId(adminId) && isAdmin() && adminId != 'admin_abdur' && adminId != request.auth.uid;
     }
 
     // Public marketplace listings
@@ -364,6 +365,8 @@ service cloud.firestore {
       allow create: if isValidId(dealId)
         && isVerifiedUser()
         && isValidDeal(incoming(), dealId)
+        && incoming().buyerId != incoming().sellerId
+        && incoming().agreedAmount >= 50
         && (incoming().buyerId == request.auth.uid || incoming().sellerId == request.auth.uid)
         && incoming().status == 'confirming'
         && incoming().buyerInitialDone == false
@@ -373,6 +376,9 @@ service cloud.firestore {
         && isValidDeal(incoming(), dealId)
         && incoming().buyerId == existing().buyerId
         && incoming().sellerId == existing().sellerId
+        && incoming().listingId == existing().listingId
+        && incoming().conversationId == existing().conversationId
+        && incoming().paymentContact == existing().paymentContact
         && incoming().createdAt == existing().createdAt
         && incoming().agreedAmount == existing().agreedAmount
         && (
@@ -447,11 +453,14 @@ service cloud.firestore {
       }
     }
 
-    // Notifications (strictly recipient-scoped)
+    // Notifications (strictly recipient-scoped; non-admins cannot spoof system alerts)
     match /notifications/{notificationId} {
       allow get: if isValidId(notificationId) && isSignedIn() && (existing().recipientId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.recipientId == request.auth.uid || isBootstrapAdmin());
-      allow create: if isValidId(notificationId) && isVerifiedUser() && isValidNotification(incoming(), notificationId);
+      allow create: if isValidId(notificationId)
+        && isVerifiedUser()
+        && isValidNotification(incoming(), notificationId)
+        && (!('targetType' in incoming()) || incoming().targetType != 'system' || isAdmin());
       allow update: if isValidId(notificationId) && isVerifiedUser() && existing().recipientId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
     }
 

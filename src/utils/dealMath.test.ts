@@ -5,6 +5,7 @@ import {
   computeStatementSummary,
   filterListingsByQuery,
   formatTk,
+  sortListings,
   validatePostInput,
 } from './dealMath';
 import type { Listing, StatementEntry } from '../types/dealkoro';
@@ -109,6 +110,75 @@ test('filterListingsByQuery matches title, category, and seller case-insensitive
   assert.equal(filterListingsByQuery(sample, 'rummi').length, 1);
   assert.equal(filterListingsByQuery(sample, 'glacier').length, 1);
   assert.equal(filterListingsByQuery(sample, '').length, 2);
+});
+
+test('sortListings sorts by newest, price ascending, and price descending', () => {
+  const sample: Listing[] = [
+    {
+      id: 'l_old_mid',
+      sellerId: 'u1',
+      sellerName: 'A',
+      category: 'eFootball',
+      title: 'Old Mid',
+      description: '',
+      imageUrl: '',
+      paidCount: '1',
+      linkType: 'Only Konami',
+      server: 'Bangladesh',
+      limitInfo: '7',
+      price: 2000,
+      rating: 5,
+      status: 'active',
+      createdAt: '2026-11-01T00:00:00Z',
+    },
+    {
+      id: 'l_new_low',
+      sellerId: 'u2',
+      sellerName: 'B',
+      category: 'eFootball',
+      title: 'New Low',
+      description: '',
+      imageUrl: '',
+      paidCount: '1',
+      linkType: 'Only Konami',
+      server: 'Bangladesh',
+      limitInfo: '7',
+      price: 900,
+      rating: 5,
+      status: 'active',
+      createdAt: '2026-11-03T00:00:00Z',
+    },
+    {
+      id: 'l_mid_high',
+      sellerId: 'u3',
+      sellerName: 'C',
+      category: 'eFootball',
+      title: 'Mid High',
+      description: '',
+      imageUrl: '',
+      paidCount: '1',
+      linkType: 'Only Konami',
+      server: 'Bangladesh',
+      limitInfo: '7',
+      price: 4500,
+      rating: 5,
+      status: 'active',
+      createdAt: '2026-11-02T00:00:00Z',
+    },
+  ];
+
+  assert.deepEqual(
+    sortListings(sample, 'newest').map((i) => i.id),
+    ['l_new_low', 'l_mid_high', 'l_old_mid']
+  );
+  assert.deepEqual(
+    sortListings(sample, 'price_asc').map((i) => i.id),
+    ['l_new_low', 'l_old_mid', 'l_mid_high']
+  );
+  assert.deepEqual(
+    sortListings(sample, 'price_desc').map((i) => i.id),
+    ['l_mid_high', 'l_old_mid', 'l_new_low']
+  );
 });
 
 test('computeStatementSummary aggregates sell income, admin fees, and buy payments', () => {

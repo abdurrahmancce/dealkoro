@@ -11,6 +11,7 @@ import type {
   NotificationItem,
   PlatformEscrowConfig,
   StatementEntry,
+  ThemeMode,
 } from './types/dealkoro';
 import {
   auth,
@@ -22,8 +23,11 @@ import {
   BOOTSTRAP_ADMIN_EMAIL,
   buildNewDealFromConversation,
   createDealInFirestore,
+  deleteAdminAgentFromFirestore,
+  deleteListingFromFirestore,
   ensureVerifiedAdminsInFirestore,
   getInitialState,
+  getInitialTheme,
   markNotificationReadInFirestore,
   persistAdminAgentToFirestore,
   persistCommentToFirestore,
@@ -36,6 +40,7 @@ import {
   persistStatementToFirestore,
   resolveUserProfileFromFirebase,
   saveLocalPreferences,
+  saveThemePreference,
   subscribeConversationMessages,
   subscribeDealMessages,
   subscribeFirebaseAdmins,
@@ -72,6 +77,7 @@ export default function App() {
   const [state, setState] = useState<DealkoroPersistedState>(() =>
     getInitialState()
   );
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [authResolved, setAuthResolved] = useState(false);
   const [routeStack, setRouteStack] = useState<AppRoute[]>([{ screen: 'home' }]);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -84,6 +90,10 @@ export default function App() {
   useEffect(() => {
     saveLocalPreferences(state.language, state.bookmarks);
   }, [state.language, state.bookmarks]);
+
+  useEffect(() => {
+    saveThemePreference(theme);
+  }, [theme]);
 
   useEffect(() => {
     void testFirestoreConnection();
@@ -274,6 +284,10 @@ export default function App() {
     setState((prev) => ({ ...prev, language: lang }));
   };
 
+  const handleToggleTheme = (next?: ThemeMode) => {
+    setTheme((prev) => next ?? (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     setAuthError(null);
@@ -305,8 +319,8 @@ export default function App() {
 
   if (!authResolved) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="bg-white border border-slate-200 rounded-2xl px-6 py-5 text-sm font-semibold text-slate-700 shadow-xs">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-6 py-5 text-sm font-semibold text-slate-700 dark:text-slate-200 shadow-xs">
           Verifying Firebase session...
         </div>
       </div>
@@ -317,7 +331,9 @@ export default function App() {
     return (
       <AuthScreen
         language={state.language}
+        theme={theme}
         onToggleLanguage={handleToggleLanguage}
+        onToggleTheme={handleToggleTheme}
         onGoogleSignIn={handleGoogleSignIn}
         googleLoading={googleLoading}
         authError={authError}
@@ -348,6 +364,24 @@ export default function App() {
       reportSyncError('Could not save listing to Firestore. Verify your Google account is verified.')
     );
     navigateTo({ screen: 'post_detail', listingId: listing.id });
+  };
+
+  const handleDeleteListing = (listingId: string) => {
+    const target = state.listings.find((l) => l.id === listingId);
+    if (!target) return;
+    if (target.sellerId !== user.uid && user.role !== 'admin') {
+      reportSyncError('Only the listing owner or a verified Admin can delete this post.');
+      return;
+    }
+    setState((prev) => ({
+      ...prev,
+      listings: prev.listings.filter((l) => l.id !== listingId),
+      bookmarks: prev.bookmarks.filter((id) => id !== listingId),
+    }));
+    void deleteListingFromFirestore(listingId).catch(() =>
+      reportSyncError('Could not remove listing from Firestore.')
+    );
+    setRouteStack([{ screen: 'home' }]);
   };
 
   const handleOpenOrCreateChatForListing = (listing: Listing) => {
@@ -909,6 +943,17 @@ export default function App() {
     );
   };
 
+  const handleRemoveVerifiedAdmin = (adminUid: string) => {
+    if (user.role !== 'admin' || adminUid === user.uid || adminUid === 'admin_abdur') return;
+    setState((prev) => ({
+      ...prev,
+      admins: prev.admins.filter((a) => a.uid !== adminUid),
+    }));
+    void deleteAdminAgentFromFirestore(adminUid).catch(() =>
+      reportSyncError('Could not remove verified moderator from Firestore.')
+    );
+  };
+
   const unreadNotifications = state.notifications.filter(
     (n) => !n.isRead && (n.recipientId === user.uid || user.role === 'admin')
   ).length;
@@ -932,10 +977,12 @@ export default function App() {
     <AppShell
       user={user}
       language={state.language}
+      theme={theme}
       route={currentRoute}
       unreadNotifications={unreadNotifications}
       unreadMessages={unreadMessages}
       drawerOpen={drawerOpen}
+      onToggleTheme={handleToggleTheme}
       onOpenDrawer={() => setDrawerOpen(true)}
       onCloseDrawer={() => setDrawerOpen(false)}
       onNavigate={navigateTo}
@@ -946,13 +993,13 @@ export default function App() {
       {syncNotice && (
         <div
           role="alert"
-          className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-3 text-xs font-medium text-amber-900"
+          className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center justify-between gap-3 text-xs font-medium text-amber-900 dark:text-amber-200"
         >
           <span>{syncNotice}</span>
           <button
             type="button"
             onClick={() => setSyncNotice(null)}
-            className="px-2 py-1 text-xs font-bold text-amber-800 hover:bg-amber-100 rounded-lg"
+            className="px-2 py-1 text-xs font-bold text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 rounded-lg"
           >
             Dismiss
           </button>
@@ -1033,6 +1080,7 @@ export default function App() {
         <ProfileScreen
           user={user}
           language={state.language}
+          theme={theme}
           subScreen={currentRoute.screen}
           listings={state.listings}
           bookmarks={state.bookmarks}
@@ -1046,6 +1094,7 @@ export default function App() {
             void syncFirebaseUserProfile(nextUser).catch(() => {});
           }}
           onToggleLanguage={handleToggleLanguage}
+          onToggleTheme={handleToggleTheme}
           onLogout={() => void handleLogout()}
           onToggleBookmark={handleToggleBookmark}
         />
@@ -1065,20 +1114,23 @@ export default function App() {
         );
         if (!listing) {
           return (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center text-sm text-slate-600">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-600 dark:text-slate-300">
               Listing not found.
             </div>
           );
         }
+        const canDelete = listing.sellerId === user.uid || user.role === 'admin';
         return (
           <PostDetailScreen
             language={state.language}
             listing={listing}
             comments={state.comments.filter((c) => c.listingId === listing.id)}
             isBookmarked={state.bookmarks.includes(listing.id)}
+            canDelete={canDelete}
             onToggleBookmark={() => handleToggleBookmark(listing.id)}
             onMessageSeller={() => handleOpenOrCreateChatForListing(listing)}
             onAddComment={(text) => handleAddComment(listing.id, text)}
+            onDeleteListing={() => handleDeleteListing(listing.id)}
           />
         );
       })()}
@@ -1099,6 +1151,7 @@ export default function App() {
           onReleasePayout={handleReleasePayout}
           onSavePlatformConfig={handleSavePlatformConfig}
           onAddVerifiedAdmin={handleAddVerifiedAdmin}
+          onRemoveVerifiedAdmin={handleRemoveVerifiedAdmin}
         />
       )}
 
@@ -1151,7 +1204,7 @@ export default function App() {
         );
         if (!conv) {
           return (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center text-sm text-slate-600">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-600 dark:text-slate-300">
               Conversation not found.
             </div>
           );
@@ -1177,7 +1230,7 @@ export default function App() {
         const deal = state.deals.find((d) => d.id === currentRoute.dealId);
         if (!deal) {
           return (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center text-sm text-slate-600">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-600 dark:text-slate-300">
               Deal not found.
             </div>
           );

@@ -103,6 +103,19 @@ export function filterListingsByQuery(listings: Listing[], rawQuery: string): Li
   });
 }
 
+export type ListingSortOption = 'newest' | 'price_asc' | 'price_desc';
+
+export function sortListings(listings: Listing[], sortBy: ListingSortOption): Listing[] {
+  const copy = [...listings];
+  if (sortBy === 'price_asc') {
+    return copy.sort((a, b) => a.price - b.price);
+  }
+  if (sortBy === 'price_desc') {
+    return copy.sort((a, b) => b.price - a.price);
+  }
+  return copy.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
 export interface StatementSummary {
   totalSellIncome: number;
   totalAdminIncome: number;

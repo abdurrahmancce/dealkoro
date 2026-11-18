@@ -13,7 +13,7 @@ export function ResilientImage({ src, alt, className = '' }: ResilientImageProps
   if (!src || failed) {
     return (
       <div
-        className={`bg-gradient-to-br from-slate-800 via-slate-900 to-blue-950 flex flex-col items-center justify-center p-4 text-slate-300 ${className}`}
+        className={`bg-gradient-to-br from-slate-800 via-slate-900 to-blue-950 dark:from-slate-900 dark:via-slate-950 dark:to-blue-950 flex flex-col items-center justify-center p-4 text-slate-300 ${className}`}
         role="img"
         aria-label={alt}
       >

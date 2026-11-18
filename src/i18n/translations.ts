@@ -124,6 +124,13 @@ export const translations = {
     noActiveDeals: 'No active escrow deals right now.',
     noPendingPayouts: 'No payouts awaiting release.',
     escrowSettings: 'Escrow Settings',
+    appearance: 'Appearance',
+    lightMode: 'Light',
+    darkMode: 'Dark',
+    deleteListing: 'Delete Post',
+    sortNewest: 'Newest',
+    sortLowHigh: 'Price: Low to High',
+    sortHighLow: 'Price: High to Low',
   },
   bn: {
     brand: 'DEALKORO',
@@ -248,6 +255,13 @@ export const translations = {
     noActiveDeals: 'বর্তমানে কোনো চলমান এস্ক্রো ডিল নেই।',
     noPendingPayouts: 'রিলিজের অপেক্ষায় কোনো পেআউট নেই।',
     escrowSettings: 'এস্ক্রো সেটিংস',
+    appearance: 'থিম মোড',
+    lightMode: 'লাইট',
+    darkMode: 'ডার্ক',
+    deleteListing: 'পোস্ট মুছুন',
+    sortNewest: 'সর্বশেষ',
+    sortLowHigh: 'দাম: কম থেকে বেশি',
+    sortHighLow: 'দাম: বেশি থেকে কম',
   },
 } as const;
 
