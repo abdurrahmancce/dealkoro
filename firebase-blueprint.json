@@ -39,6 +39,7 @@
         "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "name": { "type": "string", "minLength": 1, "maxLength": 80 },
         "verified": { "type": "boolean" },
+        "specialty": { "type": "string", "maxLength": 160 },
         "reviewNotes": { "type": "string", "maxLength": 500 },
         "completedDeals": { "type": "number" },
         "rating": { "type": "number" }
@@ -56,7 +57,7 @@
         "category": { "type": "string", "enum": ["eFootball", "PUBG Mobile", "Free Fire", "Mobile Legends", "Other"] },
         "title": { "type": "string", "minLength": 2, "maxLength": 120 },
         "description": { "type": "string", "maxLength": 1000 },
-        "imageUrl": { "type": "string", "maxLength": 512 },
+        "imageUrl": { "type": "string", "maxLength": 140000 },
         "paidCount": { "type": "string", "maxLength": 32 },
         "linkType": { "type": "string", "enum": ["Only Konami", "Konami + Glink", "Konami + iOSlink", "Gg Lost"] },
         "server": { "type": "string", "maxLength": 60 },
@@ -90,11 +91,19 @@
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "listingId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "listingTitle": { "type": "string", "maxLength": 120 },
+        "listingPrice": { "type": "number" },
+        "listingImage": { "type": "string", "maxLength": 140000 },
         "buyerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "buyerName": { "type": "string", "maxLength": 80 },
         "sellerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sellerName": { "type": "string", "maxLength": 80 },
         "lastMessage": { "type": "string", "maxLength": 300 },
+        "unreadCount": { "type": "number" },
         "negotiatedPrice": { "type": "number" },
         "offerStatus": { "type": "string", "enum": ["none", "offered", "accepted", "declined"] },
+        "dealId": { "type": "string", "maxLength": 128 },
+        "isSupport": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "listingId", "buyerId", "sellerId", "offerStatus", "updatedAt"]
@@ -109,6 +118,7 @@
         "senderName": { "type": "string", "minLength": 1, "maxLength": 80 },
         "text": { "type": "string", "minLength": 1, "maxLength": 800 },
         "type": { "type": "string", "enum": ["text", "offer", "system", "proof", "account_details"] },
+        "offerAmount": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "senderId", "senderName", "text", "type", "createdAt"]
@@ -119,19 +129,37 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
         "conversationId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "listingId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "listingTitle": { "type": "string", "maxLength": 120 },
+        "listingImage": { "type": "string", "maxLength": 140000 },
         "buyerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "buyerName": { "type": "string", "maxLength": 80 },
         "sellerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sellerName": { "type": "string", "maxLength": 80 },
         "adminId": { "type": "string", "maxLength": 128 },
+        "adminName": { "type": "string", "maxLength": 80 },
         "agreedAmount": { "type": "number" },
         "serviceType": { "type": "string", "enum": ["pending", "normal", "ultimate_safe"] },
+        "serviceFee": { "type": "number" },
         "buyerMethod": { "type": "string", "enum": ["pending", "bKash", "Nagad"] },
         "sellerMethod": { "type": "string", "enum": ["pending", "bKash", "Nagad"] },
+        "crossDealRequired": { "type": "boolean" },
         "crossDealAccepted": { "type": "boolean" },
+        "crossDealFee": { "type": "number" },
         "iosCheck": { "type": "boolean" },
         "googleBindCheck": { "type": "boolean" },
+        "verificationFee": { "type": "number" },
         "totalAmount": { "type": "number" },
+        "paymentContact": { "type": "string", "maxLength": 120 },
+        "paymentProofNote": { "type": "string", "maxLength": 300 },
+        "paymentProofUrl": { "type": "string", "maxLength": 140000 },
+        "buyerInitialDone": { "type": "boolean" },
+        "sellerExchanged": { "type": "boolean" },
+        "accountDetailsNote": { "type": "string", "maxLength": 500 },
+        "reviewRating": { "type": "number" },
+        "reviewComment": { "type": "string", "maxLength": 500 },
         "status": {
           "type": "string",
           "enum": [
@@ -163,6 +191,8 @@
         "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "dealId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "reviewerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reviewerName": { "type": "string", "maxLength": 80 },
+        "targetAdminName": { "type": "string", "maxLength": 80 },
         "rating": { "type": "number" },
         "comment": { "type": "string", "maxLength": 500 },
         "createdAt": { "type": "string", "format": "date-time" }
@@ -178,6 +208,8 @@
         "recipientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "actorName": { "type": "string", "minLength": 1, "maxLength": 80 },
         "message": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "targetType": { "type": "string", "enum": ["listing", "deal", "conversation", "system"] },
+        "targetId": { "type": "string", "maxLength": 128 },
         "isRead": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
@@ -194,9 +226,26 @@
         "title": { "type": "string", "minLength": 1, "maxLength": 120 },
         "type": { "type": "string", "enum": ["sell_income", "buy_payment", "admin_fee_income"] },
         "amount": { "type": "number" },
+        "feeAmount": { "type": "number" },
+        "netAmount": { "type": "number" },
+        "method": { "type": "string", "enum": ["bKash", "Nagad"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "dealId", "title", "type", "amount", "createdAt"]
+    },
+    "PlatformEscrowConfig": {
+      "title": "PlatformEscrowConfig",
+      "description": "Official DEALKORO bKash/Nagad escrow payment numbers and notice configured by Admins.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bkashNumber": { "type": "string", "minLength": 6, "maxLength": 32 },
+        "nagadNumber": { "type": "string", "minLength": 6, "maxLength": 32 },
+        "escrowLabel": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "announcement": { "type": "string", "maxLength": 240 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "bkashNumber", "nagadNumber", "escrowLabel", "updatedAt"]
     }
   },
   "firestore": {
@@ -247,6 +296,10 @@
     "/statements/{statementId}": {
       "schema": { "$ref": "#/entities/StatementEntry" },
       "description": "Per-user transaction and income statement entries."
+    },
+    "/platformConfig/{configId}": {
+      "schema": { "$ref": "#/entities/PlatformEscrowConfig" },
+      "description": "Admin-managed escrow payment contacts and launch notices."
     }
   }
 }

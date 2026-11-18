@@ -123,6 +123,7 @@ export const translations = {
     allOverview: 'Overview',
     noActiveDeals: 'No active escrow deals right now.',
     noPendingPayouts: 'No payouts awaiting release.',
+    escrowSettings: 'Escrow Settings',
   },
   bn: {
     brand: 'DEALKORO',
@@ -246,6 +247,7 @@ export const translations = {
     allOverview: 'সংক্ষিপ্ত চিত্র',
     noActiveDeals: 'বর্তমানে কোনো চলমান এস্ক্রো ডিল নেই।',
     noPendingPayouts: 'রিলিজের অপেক্ষায় কোনো পেআউট নেই।',
+    escrowSettings: 'এস্ক্রো সেটিংস',
   },
 } as const;
 

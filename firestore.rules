@@ -30,10 +30,22 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isBootstrapAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'akash.abdur.2002@gmail.com';
+    }
+
     function isAdmin() {
-      return isVerifiedUser() && (
-        request.auth.token.email == 'akash.abdur.2002@gmail.com' ||
+      return isBootstrapAdmin() || (
+        isVerifiedUser() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidImageField(val) {
+      return val is string && (
+        val == '' ||
+        (val.size() <= 512 && (val.matches('^https://.*') || val.matches('^/src/assets/.*'))) ||
+        (val.size() <= 140000 && val.matches('^data:image/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$'))
       );
     }
 
@@ -62,6 +74,18 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    function isValidAdminAgent(data, adminId) {
+      return data.keys().hasAll(['uid', 'name', 'verified', 'reviewNotes', 'completedDeals', 'rating'])
+        && data.keys().hasOnly(['uid', 'name', 'verified', 'specialty', 'reviewNotes', 'completedDeals', 'rating'])
+        && data.uid == adminId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.verified is bool
+        && (!('specialty' in data) || (data.specialty is string && data.specialty.size() <= 160))
+        && data.reviewNotes is string && data.reviewNotes.size() <= 500
+        && data.completedDeals is number && data.completedDeals >= 0
+        && data.rating is number && data.rating >= 0 && data.rating <= 5;
+    }
+
     function isValidListing(data, listingId) {
       return data.keys().hasAll(['id', 'sellerId', 'sellerName', 'category', 'title', 'linkType', 'price', 'status', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['id', 'sellerId', 'sellerName', 'category', 'title', 'description', 'imageUrl', 'paidCount', 'linkType', 'server', 'limitInfo', 'price', 'rating', 'status', 'createdAt', 'updatedAt'])
@@ -71,7 +95,7 @@ service cloud.firestore {
         && data.category in ['eFootball', 'PUBG Mobile', 'Free Fire', 'Mobile Legends', 'Other']
         && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
         && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
-        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 512))
+        && (!('imageUrl' in data) || isValidImageField(data.imageUrl))
         && (!('paidCount' in data) || (data.paidCount is string && data.paidCount.size() <= 32))
         && data.linkType in ['Only Konami', 'Konami + Glink', 'Konami + iOSlink', 'Gg Lost']
         && (!('server' in data) || (data.server is string && data.server.size() <= 60))
@@ -96,20 +120,22 @@ service cloud.firestore {
 
     function isValidConversation(data, convId) {
       return data.keys().hasAll(['id', 'listingId', 'buyerId', 'sellerId', 'offerStatus', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'listingId', 'listingTitle', 'listingPrice', 'listingImage', 'buyerId', 'buyerName', 'sellerId', 'sellerName', 'lastMessage', 'negotiatedPrice', 'offerStatus', 'dealId', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'listingId', 'listingTitle', 'listingPrice', 'listingImage', 'buyerId', 'buyerName', 'sellerId', 'sellerName', 'lastMessage', 'unreadCount', 'negotiatedPrice', 'offerStatus', 'dealId', 'isSupport', 'updatedAt'])
         && data.id == convId
         && isValidId(data.listingId)
         && isValidId(data.buyerId)
         && isValidId(data.sellerId)
         && (!('listingTitle' in data) || (data.listingTitle is string && data.listingTitle.size() <= 120))
         && (!('listingPrice' in data) || (data.listingPrice is number && data.listingPrice >= 0))
-        && (!('listingImage' in data) || (data.listingImage is string && data.listingImage.size() <= 512))
+        && (!('listingImage' in data) || isValidImageField(data.listingImage))
         && (!('buyerName' in data) || (data.buyerName is string && data.buyerName.size() <= 80))
         && (!('sellerName' in data) || (data.sellerName is string && data.sellerName.size() <= 80))
         && (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() <= 300))
+        && (!('unreadCount' in data) || (data.unreadCount is number && data.unreadCount >= 0))
         && (!('negotiatedPrice' in data) || (data.negotiatedPrice is number && data.negotiatedPrice >= 0))
         && data.offerStatus in ['none', 'offered', 'accepted', 'declined']
         && (!('dealId' in data) || (data.dealId is string && data.dealId.size() <= 128))
+        && (!('isSupport' in data) || data.isSupport is bool)
         && data.updatedAt == request.time;
     }
 
@@ -117,7 +143,7 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'senderId', 'senderName', 'text', 'type', 'createdAt'])
         && data.keys().hasOnly(['id', 'senderId', 'senderName', 'text', 'type', 'offerAmount', 'createdAt'])
         && data.id == msgId
-        && data.senderId == request.auth.uid
+        && (data.senderId == request.auth.uid || (data.senderId == 'system' && isAdmin()))
         && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80
         && data.text is string && data.text.size() >= 1 && data.text.size() <= 800
         && data.type in ['text', 'offer', 'system', 'proof', 'account_details']
@@ -127,18 +153,48 @@ service cloud.firestore {
 
     function isValidDeal(data, dealId) {
       return data.keys().hasAll(['id', 'conversationId', 'listingId', 'buyerId', 'sellerId', 'agreedAmount', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'conversationId', 'listingId', 'listingTitle', 'listingImage', 'buyerId', 'buyerName', 'sellerId', 'sellerName', 'adminId', 'adminName', 'agreedAmount', 'serviceType', 'serviceFee', 'buyerMethod', 'sellerMethod', 'crossDealAccepted', 'crossDealFee', 'iosCheck', 'googleBindCheck', 'verificationFee', 'totalAmount', 'paymentContact', 'paymentProofUrl', 'buyerInitialDone', 'sellerExchanged', 'accountDetailsNote', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'title', 'conversationId', 'listingId', 'listingTitle', 'listingImage',
+          'buyerId', 'buyerName', 'sellerId', 'sellerName', 'adminId', 'adminName',
+          'agreedAmount', 'serviceType', 'serviceFee', 'buyerMethod', 'sellerMethod',
+          'crossDealRequired', 'crossDealAccepted', 'crossDealFee',
+          'iosCheck', 'googleBindCheck', 'verificationFee', 'totalAmount',
+          'paymentContact', 'paymentProofNote', 'paymentProofUrl',
+          'buyerInitialDone', 'sellerExchanged', 'accountDetailsNote',
+          'reviewRating', 'reviewComment', 'status', 'createdAt', 'updatedAt'
+        ])
         && data.id == dealId
+        && (!('title' in data) || (data.title is string && data.title.size() >= 1 && data.title.size() <= 120))
         && isValidId(data.conversationId)
         && isValidId(data.listingId)
+        && (!('listingTitle' in data) || (data.listingTitle is string && data.listingTitle.size() <= 120))
+        && (!('listingImage' in data) || isValidImageField(data.listingImage))
         && isValidId(data.buyerId)
+        && (!('buyerName' in data) || (data.buyerName is string && data.buyerName.size() <= 80))
         && isValidId(data.sellerId)
+        && (!('sellerName' in data) || (data.sellerName is string && data.sellerName.size() <= 80))
         && (!('adminId' in data) || (data.adminId is string && data.adminId.size() <= 128))
+        && (!('adminName' in data) || (data.adminName is string && data.adminName.size() <= 80))
         && data.agreedAmount is number && data.agreedAmount >= 0 && data.agreedAmount <= 1000000
         && (!('serviceType' in data) || (data.serviceType in ['pending', 'normal', 'ultimate_safe']))
+        && (!('serviceFee' in data) || (data.serviceFee is number && data.serviceFee >= 0))
         && (!('buyerMethod' in data) || (data.buyerMethod in ['pending', 'bKash', 'Nagad']))
         && (!('sellerMethod' in data) || (data.sellerMethod in ['pending', 'bKash', 'Nagad']))
+        && (!('crossDealRequired' in data) || data.crossDealRequired is bool)
+        && (!('crossDealAccepted' in data) || data.crossDealAccepted is bool)
+        && (!('crossDealFee' in data) || (data.crossDealFee is number && data.crossDealFee >= 0))
+        && (!('iosCheck' in data) || data.iosCheck is bool)
+        && (!('googleBindCheck' in data) || data.googleBindCheck is bool)
+        && (!('verificationFee' in data) || (data.verificationFee is number && data.verificationFee >= 0))
         && (!('totalAmount' in data) || (data.totalAmount is number && data.totalAmount >= 0))
+        && (!('paymentContact' in data) || (data.paymentContact is string && data.paymentContact.size() <= 120))
+        && (!('paymentProofNote' in data) || (data.paymentProofNote is string && data.paymentProofNote.size() <= 300))
+        && (!('paymentProofUrl' in data) || isValidImageField(data.paymentProofUrl))
+        && (!('buyerInitialDone' in data) || data.buyerInitialDone is bool)
+        && (!('sellerExchanged' in data) || data.sellerExchanged is bool)
+        && (!('accountDetailsNote' in data) || (data.accountDetailsNote is string && data.accountDetailsNote.size() <= 500))
+        && (!('reviewRating' in data) || (data.reviewRating is number && data.reviewRating >= 1 && data.reviewRating <= 5))
+        && (!('reviewComment' in data) || (data.reviewComment is string && data.reviewComment.size() <= 500))
         && data.status in ['confirming', 'finding_admin', 'service_select', 'payment_method', 'cross_deal', 'verification_checks', 'cost_summary', 'payment_instruction', 'payment_received', 'id_exchange', 'review_prompt', 'done', 'cancelled']
         && data.createdAt is timestamp
         && data.updatedAt == request.time;
@@ -150,6 +206,8 @@ service cloud.firestore {
         && data.id == reviewId
         && data.dealId == dealId
         && data.reviewerId == request.auth.uid
+        && (!('reviewerName' in data) || (data.reviewerName is string && data.reviewerName.size() <= 80))
+        && (!('targetAdminName' in data) || (data.targetAdminName is string && data.targetAdminName.size() <= 80))
         && data.rating is number && data.rating >= 1 && data.rating <= 5
         && data.comment is string && data.comment.size() >= 1 && data.comment.size() <= 500
         && data.createdAt == request.time;
@@ -162,6 +220,8 @@ service cloud.firestore {
         && isValidId(data.recipientId)
         && data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 80
         && data.message is string && data.message.size() >= 1 && data.message.size() <= 240
+        && (!('targetType' in data) || (data.targetType in ['listing', 'deal', 'conversation', 'system']))
+        && (!('targetId' in data) || (data.targetId is string && data.targetId.size() <= 128))
         && data.isRead is bool
         && data.createdAt == request.time;
     }
@@ -170,23 +230,37 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'userId', 'dealId', 'title', 'type', 'amount', 'createdAt'])
         && data.keys().hasOnly(['id', 'userId', 'dealId', 'title', 'type', 'amount', 'feeAmount', 'netAmount', 'method', 'createdAt'])
         && data.id == stmtId
-        && data.userId == request.auth.uid
+        && isValidId(data.userId)
         && isValidId(data.dealId)
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
         && data.type in ['sell_income', 'buy_payment', 'admin_fee_income']
         && data.amount is number && data.amount >= 0
+        && (!('feeAmount' in data) || (data.feeAmount is number && data.feeAmount >= 0))
+        && (!('netAmount' in data) || (data.netAmount is number && data.netAmount >= 0))
+        && (!('method' in data) || (data.method in ['bKash', 'Nagad']))
         && data.createdAt == request.time;
+    }
+
+    function isValidPlatformConfig(data, configId) {
+      return data.keys().hasAll(['id', 'bkashNumber', 'nagadNumber', 'escrowLabel', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'bkashNumber', 'nagadNumber', 'escrowLabel', 'announcement', 'updatedAt'])
+        && data.id == configId
+        && data.bkashNumber is string && data.bkashNumber.size() >= 6 && data.bkashNumber.size() <= 32
+        && data.nagadNumber is string && data.nagadNumber.size() >= 6 && data.nagadNumber.size() <= 32
+        && data.escrowLabel is string && data.escrowLabel.size() >= 2 && data.escrowLabel.size() <= 80
+        && (!('announcement' in data) || (data.announcement is string && data.announcement.size() <= 240))
+        && data.updatedAt == request.time;
     }
 
     // Users public & isolated private PII
     match /users/{userId} {
       allow get: if isValidId(userId) && isSignedIn();
-      allow list: if isAdmin();
+      allow list: if isBootstrapAdmin();
       allow create: if isValidId(userId)
         && isVerifiedUser()
         && isOwner(userId)
         && isValidUserPublic(incoming(), userId)
-        && incoming().role == 'user';
+        && (incoming().role == 'user' || isAdmin());
       allow update: if isValidId(userId)
         && isValidUserPublic(incoming(), userId)
         && (
@@ -197,7 +271,7 @@ service cloud.firestore {
 
       match /private/{docId} {
         allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
-        allow list: if isOwner(userId) || isAdmin();
+        allow list: if isOwner(userId) || isBootstrapAdmin();
         allow create, update: if isValidId(userId) && isValidId(docId) && isVerifiedUser() && (isOwner(userId) || isAdmin()) && isValidUserPrivate(incoming(), userId);
         allow delete: if isOwner(userId) || isAdmin();
       }
@@ -207,7 +281,7 @@ service cloud.firestore {
     match /admins/{adminId} {
       allow get: if isValidId(adminId) && isSignedIn();
       allow list: if isSignedIn();
-      allow create, update, delete: if isValidId(adminId) && isAdmin();
+      allow create, update, delete: if isValidId(adminId) && isAdmin() && isValidAdminAgent(incoming(), adminId);
     }
 
     // Public marketplace listings
@@ -225,7 +299,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && (
           isAdmin() ||
-          (isVerifiedUser() && existing().sellerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'status', 'updatedAt']))
+          (isVerifiedUser() && existing().sellerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'status', 'updatedAt']) && incoming().status in ['active', 'in_deal'])
         );
       allow delete: if isValidId(listingId) && (isAdmin() || (isVerifiedUser() && existing().sellerId == request.auth.uid));
 
@@ -248,12 +322,12 @@ service cloud.firestore {
       }
 
       allow get: if isValidId(conversationId) && (isConvMember(existing()) || isAdmin());
-      allow list: if isSignedIn() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || isBootstrapAdmin());
       allow create: if isValidId(conversationId)
         && isVerifiedUser()
         && isValidConversation(incoming(), conversationId)
         && (incoming().buyerId == request.auth.uid || incoming().sellerId == request.auth.uid)
-        && exists(/databases/$(database)/documents/listings/$(incoming().listingId));
+        && ((('isSupport' in incoming()) && incoming().isSupport == true && incoming().listingId == 'admin_support') || exists(/databases/$(database)/documents/listings/$(incoming().listingId)));
       allow update: if isValidId(conversationId)
         && isValidConversation(incoming(), conversationId)
         && incoming().buyerId == existing().buyerId
@@ -261,7 +335,7 @@ service cloud.firestore {
         && incoming().listingId == existing().listingId
         && (
           isAdmin() ||
-          (isVerifiedUser() && isConvMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'negotiatedPrice', 'offerStatus', 'dealId', 'updatedAt']))
+          (isVerifiedUser() && isConvMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'unreadCount', 'negotiatedPrice', 'offerStatus', 'dealId', 'updatedAt']))
         );
 
       match /messages/{messageId} {
@@ -279,36 +353,68 @@ service cloud.firestore {
       }
     }
 
-    // Admin-mediated escrow deals
+    // Admin-mediated escrow deals (Hardened: Only Admins can verify payment or release payout/complete)
     match /deals/{dealId} {
       function isDealParticipant(d) {
         return isSignedIn() && (request.auth.uid == d.buyerId || request.auth.uid == d.sellerId || request.auth.uid == d.adminId);
       }
 
       allow get: if isValidId(dealId) && (isDealParticipant(existing()) || isAdmin());
-      allow list: if isSignedIn() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || resource.data.adminId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.buyerId == request.auth.uid || resource.data.sellerId == request.auth.uid || resource.data.adminId == request.auth.uid || isBootstrapAdmin());
       allow create: if isValidId(dealId)
         && isVerifiedUser()
         && isValidDeal(incoming(), dealId)
         && (incoming().buyerId == request.auth.uid || incoming().sellerId == request.auth.uid)
+        && incoming().status == 'confirming'
+        && incoming().buyerInitialDone == false
+        && incoming().sellerExchanged == false
         && incoming().createdAt == request.time;
       allow update: if isValidId(dealId)
         && isValidDeal(incoming(), dealId)
         && incoming().buyerId == existing().buyerId
         && incoming().sellerId == existing().sellerId
         && incoming().createdAt == existing().createdAt
+        && incoming().agreedAmount == existing().agreedAmount
         && (
           isAdmin() ||
           (
             isVerifiedUser()
             && isDealParticipant(existing())
             && !(existing().status in ['done', 'cancelled'])
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'adminId', 'adminName', 'serviceType', 'serviceFee', 'buyerMethod', 'sellerMethod',
-              'crossDealAccepted', 'crossDealFee', 'iosCheck', 'googleBindCheck', 'verificationFee',
-              'totalAmount', 'paymentProofUrl', 'buyerInitialDone', 'sellerExchanged',
-              'accountDetailsNote', 'status', 'updatedAt'
-            ])
+            && (
+              // Action 1: Configure service, payment methods, cross-deal, verification options before payment
+              (
+                existing().status in ['confirming', 'finding_admin', 'service_select', 'payment_method', 'cross_deal', 'verification_checks', 'cost_summary']
+                && incoming().status in ['finding_admin', 'service_select', 'payment_method', 'cross_deal', 'verification_checks', 'cost_summary', 'payment_instruction', 'cancelled']
+                && incoming().buyerInitialDone == false
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'serviceType', 'serviceFee', 'buyerMethod', 'sellerMethod',
+                  'crossDealRequired', 'crossDealAccepted', 'crossDealFee',
+                  'iosCheck', 'googleBindCheck', 'verificationFee',
+                  'totalAmount', 'status', 'updatedAt'
+                ])
+              ) ||
+              // Action 2: Buyer submits TrxID / payment proof note (Admin must verify to mark payment_received)
+              (
+                request.auth.uid == existing().buyerId
+                && existing().status == 'payment_instruction'
+                && incoming().diff(existing()).affectedKeys().hasOnly(['paymentProofNote', 'paymentProofUrl', 'updatedAt'])
+              ) ||
+              // Action 3: Seller shares account handover details after admin confirmed payment -> id_exchange
+              (
+                request.auth.uid == existing().sellerId
+                && existing().status == 'id_exchange'
+                && incoming().status == 'review_prompt'
+                && incoming().sellerExchanged == true
+                && incoming().diff(existing()).affectedKeys().hasOnly(['sellerExchanged', 'accountDetailsNote', 'status', 'updatedAt'])
+              ) ||
+              // Action 4: Buyer/seller writes review feedback (Only Admin can transition status -> done on payout release)
+              (
+                (request.auth.uid == existing().buyerId || request.auth.uid == existing().sellerId)
+                && existing().status == 'review_prompt'
+                && incoming().diff(existing()).affectedKeys().hasOnly(['reviewRating', 'reviewComment', 'updatedAt'])
+              )
+            )
           )
         );
 
@@ -322,7 +428,7 @@ service cloud.firestore {
         allow create: if isValidId(dealId)
           && isValidId(messageId)
           && isVerifiedUser()
-          && isDealParticipant(parentDeal())
+          && (isDealParticipant(parentDeal()) || isAdmin())
           && isValidMessage(incoming(), messageId);
       }
 
@@ -344,16 +450,23 @@ service cloud.firestore {
     // Notifications (strictly recipient-scoped)
     match /notifications/{notificationId} {
       allow get: if isValidId(notificationId) && isSignedIn() && (existing().recipientId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow list: if isSignedIn() && (resource.data.recipientId == request.auth.uid || isBootstrapAdmin());
       allow create: if isValidId(notificationId) && isVerifiedUser() && isValidNotification(incoming(), notificationId);
       allow update: if isValidId(notificationId) && isVerifiedUser() && existing().recipientId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
     }
 
-    // Financial statements (strictly user-scoped)
+    // Financial statements (strictly admin-verified for payouts & fee income)
     match /statements/{statementId} {
       allow get: if isValidId(statementId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isValidId(statementId) && isVerifiedUser() && isValidStatement(incoming(), statementId);
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrapAdmin());
+      allow create: if isValidId(statementId) && isVerifiedUser() && isValidStatement(incoming(), statementId) && isAdmin();
+    }
+
+    // Platform escrow payment settings (readable by signed-in traders, writable only by verified Admins)
+    match /platformConfig/{configId} {
+      allow get: if isValidId(configId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create, update: if isValidId(configId) && isAdmin() && isValidPlatformConfig(incoming(), configId);
     }
   }
 }

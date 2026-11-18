@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ImagePlus } from 'lucide-react';
+import { ImagePlus, Link as LinkIcon, Loader2 } from 'lucide-react';
 import type {
   Language,
   LinkType,
@@ -10,7 +10,8 @@ import type {
 import { t } from '../i18n/translations';
 import { ASSETS } from '../data/seedData';
 import { validatePostInput } from '../utils/dealMath';
-import { buildNewListing } from '../services/dealkoroService';
+import { buildNewListing, uploadImageFile } from '../services/dealkoroService';
+import { BLUEPRINT_LIMITS, sanitizeImageUrl } from '../utils/payloadSanitizer';
 import { ResilientImage } from './ResilientImage';
 
 interface CreatePostScreenProps {
@@ -54,23 +55,58 @@ export function CreatePostScreen({
   const [linkType, setLinkType] = useState<LinkType>('Only Konami');
   const [priceText, setPriceText] = useState('');
   const [imageUrl, setImageUrl] = useState<string>(ASSETS.efootballSquad);
+  const [customUrlInput, setCustomUrlInput] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadedReady, setUploadedReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setImageUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setError(null);
+    setUploadedReady(false);
+    setUploadingImage(true);
+    const result = await uploadImageFile('listings', user.uid, file);
+    setUploadingImage(false);
+    if (result.url) {
+      setImageUrl(result.url);
+      setCustomUrlInput(result.url.startsWith('https://') ? result.url : '');
+      setUploadedReady(true);
+    } else if (result.error) {
+      setError(result.error);
+    }
+  };
+
+  const handleApplyUrl = () => {
+    setError(null);
+    setUploadedReady(false);
+    const trimmed = customUrlInput.trim();
+    if (!trimmed) {
+      setImageUrl(ASSETS.efootballSquad);
+      return;
+    }
+    if (trimmed.startsWith('data:')) {
+      setError('Paste an HTTPS link here, or tap the preview banner above to upload a photo.');
+      return;
+    }
+    if (!trimmed.startsWith('https://') && !trimmed.startsWith('/')) {
+      setError('Image URL must start with https://');
+      return;
+    }
+    if (trimmed.length > BLUEPRINT_LIMITS.URL_MAX) {
+      setError(`Image URL must be ${BLUEPRINT_LIMITS.URL_MAX} characters or less.`);
+      return;
+    }
+    setImageUrl(sanitizeImageUrl(trimmed, ASSETS.efootballSquad));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (uploadingImage) {
+      setError('Please wait for the screenshot upload to finish.');
+      return;
+    }
     const check = validatePostInput({ title, priceText });
     if (!check.valid) {
       setError(
@@ -81,12 +117,16 @@ export function CreatePostScreen({
       return;
     }
 
+    const finalImageUrl = customUrlInput.trim()
+      ? sanitizeImageUrl(customUrlInput.trim(), imageUrl)
+      : sanitizeImageUrl(imageUrl, ASSETS.efootballSquad);
+
     const newListing = buildNewListing({
       seller: user,
       title,
       description,
       category,
-      imageUrl,
+      imageUrl: finalImageUrl,
       paidCount,
       linkType,
       server,
@@ -109,8 +149,8 @@ export function CreatePostScreen({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* + Gallery Uploader & Preview */}
-        <div className="space-y-2">
+        {/* Firebase Storage Uploader, HTTPS Link & Presets */}
+        <div className="space-y-2.5">
           <div className="relative aspect-[16/9] rounded-2xl overflow-hidden bg-slate-900 border border-slate-200">
             <ResilientImage
               src={imageUrl}
@@ -118,22 +158,66 @@ export function CreatePostScreen({
               className="w-full h-full object-cover"
             />
             <label className="absolute inset-0 bg-slate-900/45 hover:bg-slate-900/55 transition-colors flex flex-col items-center justify-center cursor-pointer text-white">
-              <ImagePlus className="w-7 h-7 mb-1" />
-              <span className="text-sm font-bold">{t(language, 'galleryAdd')}</span>
+              {uploadingImage ? (
+                <>
+                  <Loader2 className="w-7 h-7 mb-1 animate-spin" />
+                  <span className="text-sm font-bold">Uploading screenshot...</span>
+                </>
+              ) : (
+                <>
+                  <ImagePlus className="w-7 h-7 mb-1" />
+                  <span className="text-sm font-bold">{t(language, 'galleryAdd')}</span>
+                </>
+              )}
               <input
                 type="file"
                 accept="image/*"
-                onChange={handleFileUpload}
+                disabled={uploadingImage}
+                onChange={(e) => void handleFileUpload(e)}
                 className="sr-only"
               />
             </label>
           </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <LinkIcon className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="url"
+                value={customUrlInput}
+                onChange={(e) => setCustomUrlInput(e.target.value)}
+                maxLength={BLUEPRINT_LIMITS.URL_MAX}
+                aria-label="HTTPS image URL"
+                placeholder="Optional HTTPS screenshot URL (max 512 chars)"
+                className="w-full min-h-[40px] pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleApplyUrl}
+              className="min-h-[40px] px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-xl whitespace-nowrap"
+            >
+              Preview URL
+            </button>
+          </div>
+
+          {uploadedReady && (
+            <div className="px-3 py-2 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl">
+              Screenshot attached &amp; compressed for instant multi-device sync!
+            </div>
+          )}
+
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
             {PRESET_IMAGES.map((preset) => (
               <button
                 key={preset.label}
                 type="button"
-                onClick={() => setImageUrl(preset.url)}
+                onClick={() => {
+                  setImageUrl(preset.url);
+                  setCustomUrlInput('');
+                  setUploadedReady(false);
+                  setError(null);
+                }}
                 className={`px-3 py-1.5 text-xs font-medium rounded-lg border whitespace-nowrap ${
                   imageUrl === preset.url
                     ? 'bg-blue-50 border-blue-600 text-blue-700'
@@ -236,7 +320,7 @@ export function CreatePostScreen({
           </div>
         </div>
 
-        {/* Link Selection Buttons matching Screen 07 */}
+        {/* Link Selection Buttons */}
         <div>
           <span className="block text-xs font-semibold text-slate-700 mb-1.5">
             {t(language, 'linkLabel')}
@@ -276,7 +360,8 @@ export function CreatePostScreen({
           </div>
           <button
             type="submit"
-            className="min-h-[46px] px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors whitespace-nowrap"
+            disabled={uploadingImage}
+            className="min-h-[46px] px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors whitespace-nowrap disabled:opacity-60"
           >
             {t(language, 'postSubmit')}
           </button>

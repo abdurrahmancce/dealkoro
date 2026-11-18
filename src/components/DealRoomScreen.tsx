@@ -2,7 +2,10 @@ import React, { useEffect, useState } from 'react';
 import {
   Check,
   CheckCircle2,
+  Clock,
   Copy,
+  Loader2,
+  Lock,
   Send,
   ShieldCheck,
   Star,
@@ -13,17 +16,27 @@ import type {
   DealServiceType,
   Language,
   PaymentMethod,
+  PlatformEscrowConfig,
   UserProfile,
 } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { calculateDealBreakdown, formatTk } from '../utils/dealMath';
+import { uploadImageFile } from '../services/dealkoroService';
+import {
+  BLUEPRINT_LIMITS,
+  formatEscrowPaymentContact,
+  sanitizeImageUrl,
+} from '../utils/payloadSanitizer';
 import { ResilientImage } from './ResilientImage';
 
 interface DealRoomScreenProps {
   user: UserProfile;
   language: Language;
   deal: AdminDeal;
-  onUpdateDeal: (updated: AdminDeal) => void;
+  platformConfig?: PlatformEscrowConfig;
+  onUpdateDeal: (updated: AdminDeal, firestorePatch?: Partial<AdminDeal>) => void;
+  onVerifyPayment?: (dealId: string) => void;
+  onReleasePayout?: (dealId: string) => void;
   onSendGroupMessage: (text: string) => void;
   onCompleteReview: (dealId: string, rating: number, comment: string) => void;
   onBackToInbox: () => void;
@@ -33,7 +46,10 @@ export function DealRoomScreen({
   user,
   language,
   deal,
+  platformConfig,
   onUpdateDeal,
+  onVerifyPayment,
+  onReleasePayout,
   onSendGroupMessage,
   onCompleteReview,
   onBackToInbox,
@@ -41,10 +57,35 @@ export function DealRoomScreen({
   const [countdown, setCountdown] = useState(60);
   const [copiedContact, setCopiedContact] = useState(false);
   const [proofNote, setProofNote] = useState(deal.paymentProofNote || '');
+  const [proofUrl, setProofUrl] = useState(deal.paymentProofUrl || '');
+  const [uploadingProof, setUploadingProof] = useState(false);
+  const [proofError, setProofError] = useState<string | null>(null);
   const [accountDetails, setAccountDetails] = useState(deal.accountDetailsNote || '');
   const [groupMsg, setGroupMsg] = useState('');
   const [reviewRating, setReviewRating] = useState(deal.reviewRating || 5);
   const [reviewComment, setReviewComment] = useState(deal.reviewComment || '');
+
+  const isAdmin = user.role === 'admin';
+  const isBuyer = user.uid === deal.buyerId;
+  const isSeller = user.uid === deal.sellerId;
+  const livePaymentContact = platformConfig
+    ? formatEscrowPaymentContact(platformConfig, deal.buyerMethod)
+    : deal.paymentContact;
+
+  useEffect(() => {
+    setProofNote(deal.paymentProofNote || '');
+    setProofUrl(deal.paymentProofUrl || '');
+    setAccountDetails(deal.accountDetailsNote || '');
+    if (deal.reviewRating) setReviewRating(deal.reviewRating);
+    if (deal.reviewComment) setReviewComment(deal.reviewComment);
+  }, [
+    deal.id,
+    deal.paymentProofNote,
+    deal.paymentProofUrl,
+    deal.accountDetailsNote,
+    deal.reviewRating,
+    deal.reviewComment,
+  ]);
 
   useEffect(() => {
     if (deal.status !== 'confirming') return;
@@ -64,7 +105,7 @@ export function DealRoomScreen({
     googleBindCheck: deal.googleBindCheck,
   });
 
-  const applyUpdate = (patch: Partial<AdminDeal>) => {
+  const applyConfigUpdate = (patch: Partial<AdminDeal>) => {
     const merged: AdminDeal = {
       ...deal,
       ...patch,
@@ -79,14 +120,49 @@ export function DealRoomScreen({
       iosCheck: merged.iosCheck,
       googleBindCheck: merged.googleBindCheck,
     });
-    onUpdateDeal({
-      ...merged,
+    const firestorePatch: Partial<AdminDeal> = {
+      ...patch,
       serviceFee: nextBreakdown.serviceFee,
       crossDealRequired: nextBreakdown.crossDealRequired,
       crossDealFee: nextBreakdown.crossDealFee,
       verificationFee: nextBreakdown.verificationFee,
       totalAmount: nextBreakdown.totalPayable,
-    });
+    };
+    onUpdateDeal(
+      {
+        ...merged,
+        ...firestorePatch,
+      },
+      firestorePatch
+    );
+  };
+
+  const applyDirectPatch = (patch: Partial<AdminDeal>) => {
+    onUpdateDeal(
+      {
+        ...deal,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      },
+      patch
+    );
+  };
+
+  const handleProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProofError(null);
+    setUploadingProof(true);
+    const res = await uploadImageFile('proofs', user.uid, file);
+    setUploadingProof(false);
+    if (res.url) {
+      setProofUrl(res.url);
+      if (!proofNote.trim()) {
+        setProofNote(`Screenshot uploaded (${file.name})`);
+      }
+    } else if (res.error) {
+      setProofError(res.error);
+    }
   };
 
   // Screen 16: Admin-deal confirmation
@@ -124,14 +200,14 @@ export function DealRoomScreen({
         <div className="space-y-2.5 pt-2">
           <button
             type="button"
-            onClick={() => applyUpdate({ status: 'finding_admin' })}
+            onClick={() => applyConfigUpdate({ status: 'finding_admin' })}
             className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors"
           >
             Continue to Find Admin
           </button>
           <button
             type="button"
-            onClick={() => applyUpdate({ status: 'cancelled' })}
+            onClick={() => applyConfigUpdate({ status: 'cancelled' })}
             className="w-full min-h-[44px] bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-colors"
           >
             CANCEL
@@ -165,7 +241,7 @@ export function DealRoomScreen({
         <p className="text-xs text-slate-500">{t(language, 'pleaseWait')}</p>
         <button
           type="button"
-          onClick={() => applyUpdate({ status: 'service_select' })}
+          onClick={() => applyConfigUpdate({ status: 'service_select' })}
           className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors"
         >
           Join Group Chat with {deal.adminName}
@@ -227,7 +303,10 @@ export function DealRoomScreen({
               {deal.listingTitle} · {formatTk(deal.agreedAmount)}
             </div>
             <div className="text-xs text-slate-500">
-              Verified Escrow Room · Total: <span className="font-bold text-slate-900 tabular-nums">{formatTk(breakdown.totalPayable)}</span>
+              Verified Escrow Room · Total:{' '}
+              <span className="font-bold text-slate-900 tabular-nums">
+                {formatTk(breakdown.totalPayable)}
+              </span>
             </div>
           </div>
         </div>
@@ -259,7 +338,7 @@ export function DealRoomScreen({
                 key={opt.type}
                 type="button"
                 onClick={() =>
-                  applyUpdate({
+                  applyConfigUpdate({
                     serviceType: opt.type,
                     status: 'payment_method',
                   })
@@ -291,7 +370,7 @@ export function DealRoomScreen({
                 <button
                   key={`seller-${method}`}
                   type="button"
-                  onClick={() => applyUpdate({ sellerMethod: method })}
+                  onClick={() => applyConfigUpdate({ sellerMethod: method })}
                   className={`w-full min-h-[44px] rounded-xl text-sm font-bold border transition-colors ${
                     deal.sellerMethod === method
                       ? 'bg-blue-600 text-white border-blue-600'
@@ -311,7 +390,7 @@ export function DealRoomScreen({
                 <button
                   key={`buyer-${method}`}
                   type="button"
-                  onClick={() => applyUpdate({ buyerMethod: method })}
+                  onClick={() => applyConfigUpdate({ buyerMethod: method })}
                   className={`w-full min-h-[44px] rounded-xl text-sm font-bold border transition-colors ${
                     deal.buyerMethod === method
                       ? 'bg-blue-600 text-white border-blue-600'
@@ -333,7 +412,7 @@ export function DealRoomScreen({
               <button
                 type="button"
                 onClick={() =>
-                  applyUpdate({
+                  applyConfigUpdate({
                     status:
                       deal.sellerMethod !== deal.buyerMethod
                         ? 'cross_deal'
@@ -367,7 +446,7 @@ export function DealRoomScreen({
             <button
               type="button"
               onClick={() =>
-                applyUpdate({
+                applyConfigUpdate({
                   crossDealAccepted: true,
                   status: 'verification_checks',
                 })
@@ -378,7 +457,7 @@ export function DealRoomScreen({
             </button>
             <button
               type="button"
-              onClick={() => applyUpdate({ status: 'payment_method' })}
+              onClick={() => applyConfigUpdate({ status: 'payment_method' })}
               className="min-h-[46px] bg-slate-600 hover:bg-slate-700 text-white text-sm font-bold rounded-xl"
             >
               {t(language, 'no')}
@@ -398,7 +477,7 @@ export function DealRoomScreen({
           <div className="space-y-2.5">
             <button
               type="button"
-              onClick={() => applyUpdate({ iosCheck: !deal.iosCheck })}
+              onClick={() => applyConfigUpdate({ iosCheck: !deal.iosCheck })}
               className={`w-full min-h-[48px] px-4 py-3 rounded-xl border text-sm font-bold flex items-center justify-between transition-colors ${
                 deal.iosCheck
                   ? 'bg-blue-50 border-blue-600 text-blue-800'
@@ -411,7 +490,9 @@ export function DealRoomScreen({
 
             <button
               type="button"
-              onClick={() => applyUpdate({ googleBindCheck: !deal.googleBindCheck })}
+              onClick={() =>
+                applyConfigUpdate({ googleBindCheck: !deal.googleBindCheck })
+              }
               className={`w-full min-h-[48px] px-4 py-3 rounded-xl border text-sm font-bold flex items-center justify-between transition-colors ${
                 deal.googleBindCheck
                   ? 'bg-blue-50 border-blue-600 text-blue-800'
@@ -425,7 +506,7 @@ export function DealRoomScreen({
 
           <button
             type="button"
-            onClick={() => applyUpdate({ status: 'cost_summary' })}
+            onClick={() => applyConfigUpdate({ status: 'cost_summary' })}
             className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
           >
             Confirm Verification Options
@@ -451,7 +532,9 @@ export function DealRoomScreen({
             {breakdown.serviceFee > 0 && (
               <div className="flex justify-between">
                 <span className="text-slate-600">
-                  {deal.serviceType === 'ultimate_safe' ? 'Ultimate Safe Deal' : 'Normal Deal'}
+                  {deal.serviceType === 'ultimate_safe'
+                    ? 'Ultimate Safe Deal'
+                    : 'Normal Deal'}
                 </span>
                 <span className="font-bold text-slate-900 tabular-nums">
                   {formatTk(breakdown.serviceFee)}
@@ -492,12 +575,12 @@ export function DealRoomScreen({
 
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
             <div className="text-xs font-semibold text-blue-700">
-              Payment contact: {deal.paymentContact}
+              Payment contact: {livePaymentContact}
             </div>
             <button
               type="button"
               onClick={() => {
-                navigator.clipboard?.writeText(deal.paymentContact);
+                navigator.clipboard?.writeText(livePaymentContact);
                 setCopiedContact(true);
               }}
               className="min-h-[36px] px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 inline-flex items-center gap-1"
@@ -509,7 +592,7 @@ export function DealRoomScreen({
 
           <button
             type="button"
-            onClick={() => applyUpdate({ status: 'payment_instruction' })}
+            onClick={() => applyConfigUpdate({ status: 'payment_instruction' })}
             className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
           >
             Proceed to Payment Proof
@@ -517,65 +600,189 @@ export function DealRoomScreen({
         </div>
       )}
 
-      {/* Screen 24: Payment Instruction & Proof */}
+      {/* Screen 24: Payment Instruction & Proof (Admin-locked verification!) */}
       {deal.status === 'payment_instruction' && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
-          <div className="text-xs font-bold text-blue-600">{deal.adminName} ✓</div>
-          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800">
-            {t(language, 'paymentInstruction')}{' '}
-            <span className="font-bold tabular-nums">{formatTk(breakdown.totalPayable)}</span> →{' '}
-            <span className="font-mono font-semibold">{deal.paymentContact}</span>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-blue-600">{deal.adminName} ✓</span>
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg">
+              <Lock className="w-3.5 h-3.5" />
+              <span>Admin Verification Required</span>
+            </span>
           </div>
 
-          <div>
-            <label
-              htmlFor="payment-proof-input"
-              className="block text-xs font-semibold text-slate-700 mb-1.5"
-            >
-              Payment Proof (Transaction ID / Screenshot reference)
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                id="payment-proof-input"
-                type="text"
-                value={proofNote}
-                onChange={(e) => setProofNote(e.target.value)}
-                placeholder="e.g. TrxID 8N4K2P19 (Photo / screenshot attached)"
-                className="flex-1 min-h-[44px] px-3.5 py-2 text-sm border border-slate-300 rounded-xl"
-              />
-              <label className="min-h-[44px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer">
-                <Upload className="w-4 h-4" />
-                <span>Photo</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) setProofNote(`Screenshot: ${f.name}`);
-                  }}
-                />
-              </label>
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-sm text-slate-800">
+            <div>
+              {t(language, 'paymentInstruction')}{' '}
+              <span className="font-bold tabular-nums">{formatTk(breakdown.totalPayable)}</span> →{' '}
+              <span className="font-mono font-semibold">{livePaymentContact}</span>
             </div>
+            {platformConfig?.announcement && (
+              <div className="text-xs text-slate-500">{platformConfig.announcement}</div>
+            )}
           </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              applyUpdate({
-                paymentProofNote: proofNote.trim() || 'Payment receipt screenshot verified',
-                buyerInitialDone: true,
-                status: 'payment_received',
-              })
-            }
-            className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
-          >
-            {t(language, 'submitPaymentProof')}
-          </button>
+          {(isBuyer || isAdmin) && (
+            <div className="space-y-3">
+              <div>
+                <label
+                  htmlFor="payment-proof-input"
+                  className="block text-xs font-semibold text-slate-700 mb-1.5"
+                >
+                  Payment Proof (Transaction ID / Reference)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="payment-proof-input"
+                    type="text"
+                    value={proofNote}
+                    onChange={(e) => setProofNote(e.target.value)}
+                    placeholder="e.g. TrxID 8N4K2P19"
+                    className="flex-1 min-h-[44px] px-3.5 py-2 text-sm border border-slate-300 rounded-xl"
+                  />
+                  <label className="min-h-[44px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer">
+                    {uploadingProof ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4" />
+                    )}
+                    <span>{uploadingProof ? 'Uploading...' : 'Photo'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={uploadingProof}
+                      className="sr-only"
+                      onChange={(e) => void handleProofUpload(e)}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {proofUrl.startsWith('data:') ? (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-16 h-12 rounded-lg overflow-hidden border border-emerald-200 bg-slate-900 shrink-0">
+                      <ResilientImage
+                        src={proofUrl}
+                        alt="Attached payment proof"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="text-xs font-semibold text-emerald-800">
+                      Payment screenshot attached &amp; ready
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setProofUrl('')}
+                    className="px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label
+                    htmlFor="payment-proof-url"
+                    className="block text-xs font-semibold text-slate-700 mb-1"
+                  >
+                    Optional Proof Screenshot HTTPS Link
+                  </label>
+                  <input
+                    id="payment-proof-url"
+                    type="url"
+                    value={proofUrl}
+                    onChange={(e) => setProofUrl(e.target.value)}
+                    maxLength={BLUEPRINT_LIMITS.URL_MAX}
+                    placeholder="https://..."
+                    className="w-full min-h-[40px] px-3.5 py-1.5 text-xs border border-slate-300 rounded-xl"
+                  />
+                </div>
+              )}
+
+              {proofError && (
+                <div
+                  role="alert"
+                  className="p-2.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-xl"
+                >
+                  {proofError}
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={uploadingProof}
+                onClick={() => {
+                  const trimmedUrl = proofUrl.trim();
+                  setProofError(null);
+                  const cleanUrl = trimmedUrl
+                    ? sanitizeImageUrl(trimmedUrl, '')
+                    : '';
+                  if (trimmedUrl && !cleanUrl) {
+                    setProofError('Use the Photo button to upload a screenshot or paste a valid HTTPS link.');
+                    return;
+                  }
+                  applyDirectPatch({
+                    paymentProofNote:
+                      proofNote.trim() || 'Buyer payment proof submitted (pending admin check)',
+                    paymentProofUrl: cleanUrl,
+                  });
+                }}
+                className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl disabled:opacity-60"
+              >
+                {t(language, 'submitPaymentProof')}
+              </button>
+            </div>
+          )}
+
+          {deal.paymentProofNote && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-amber-900 inline-flex items-center gap-1.5">
+                  <Clock className="w-4 h-4" />
+                  <span>Submitted Proof (Awaiting Admin Verification)</span>
+                </span>
+              </div>
+              <div className="text-slate-800 font-mono">{deal.paymentProofNote}</div>
+              {deal.paymentProofUrl && (
+                <div className="w-40 h-24 rounded-lg overflow-hidden border border-amber-200 bg-slate-900">
+                  <ResilientImage
+                    src={deal.paymentProofUrl}
+                    alt="Payment proof"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (onVerifyPayment) {
+                  onVerifyPayment(deal.id);
+                } else {
+                  applyDirectPatch({
+                    buyerInitialDone: true,
+                    status: 'id_exchange',
+                  });
+                }
+              }}
+              className="w-full min-h-[46px] bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl inline-flex items-center justify-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Verify Payment &amp; Unlock ID Exchange</span>
+            </button>
+          ) : (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 text-center">
+              Only a verified Admin can confirm payment receipt and unlock account handover.
+            </div>
+          )}
         </div>
       )}
 
-      {/* Screen 25: Payment Received Confirmation */}
+      {/* Screen 25: Payment Received Confirmation (Admin unlocks ID exchange) */}
       {deal.status === 'payment_received' && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
           <div className="text-xs font-bold text-blue-600">{deal.adminName} ✓</div>
@@ -585,7 +792,7 @@ export function DealRoomScreen({
                 {t(language, 'paymentReceived')}
               </div>
               <div className="text-xs text-slate-500 mt-0.5">
-                Buyer and seller confirmation
+                Admin verified escrow deposit
               </div>
             </div>
 
@@ -603,16 +810,26 @@ export function DealRoomScreen({
             <span className="font-bold text-slate-900">
               Payment receipt ({deal.paymentProofNote || 'Verified'})
             </span>
-            <span className="font-bold text-emerald-700">Status: done</span>
+            <span className="font-bold text-emerald-700">Status: verified</span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => applyUpdate({ status: 'id_exchange' })}
-            className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
-          >
-            Proceed to ID Exchange
-          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() =>
+                onVerifyPayment
+                  ? onVerifyPayment(deal.id)
+                  : applyDirectPatch({ buyerInitialDone: true, status: 'id_exchange' })
+              }
+              className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
+            >
+              Proceed to ID Exchange
+            </button>
+          ) : (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 text-center">
+              Awaiting Admin to unlock ID Exchange.
+            </div>
+          )}
         </div>
       )}
 
@@ -626,10 +843,10 @@ export function DealRoomScreen({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="py-2 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-lg">
-                Buyer: DONE
+                Buyer: VERIFIED
               </div>
-              <div className="py-2 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-lg">
-                Seller: DONE
+              <div className="py-2 bg-amber-100 text-amber-800 text-xs font-bold rounded-lg">
+                Seller: HANDOVER
               </div>
             </div>
             <div className="text-xs font-extrabold text-blue-600">
@@ -637,47 +854,66 @@ export function DealRoomScreen({
             </div>
           </div>
 
-          <div>
-            <label
-              htmlFor="account-exchange-input"
-              className="block text-xs font-semibold text-slate-700 mb-1.5"
-            >
-              {deal.sellerName.split(' ')[0]}, enter your number / account transfer details
-            </label>
-            <textarea
-              id="account-exchange-input"
-              rows={2}
-              value={accountDetails}
-              onChange={(e) => setAccountDetails(e.target.value)}
-              placeholder="e.g. Konami ID verified with buyer email & recovery OTP confirmed"
-              className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl"
-            />
-          </div>
+          {isSeller || isAdmin ? (
+            <>
+              <div>
+                <label
+                  htmlFor="account-exchange-input"
+                  className="block text-xs font-semibold text-slate-700 mb-1.5"
+                >
+                  {deal.sellerName.split(' ')[0]}, enter your account transfer / recovery confirmation
+                </label>
+                <textarea
+                  id="account-exchange-input"
+                  rows={2}
+                  value={accountDetails}
+                  onChange={(e) => setAccountDetails(e.target.value)}
+                  placeholder="e.g. Konami ID verified with buyer email & recovery OTP confirmed"
+                  className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl"
+                />
+              </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              applyUpdate({
-                sellerExchanged: true,
-                accountDetailsNote:
-                  accountDetails.trim() || 'Account details shared & verified',
-                status: 'review_prompt',
-              })
-            }
-            className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
-          >
-            {t(language, 'shareAccountDetails')}
-          </button>
+              <button
+                type="button"
+                onClick={() =>
+                  applyDirectPatch({
+                    sellerExchanged: true,
+                    accountDetailsNote:
+                      accountDetails.trim() || 'Account details shared & verified',
+                    status: 'review_prompt',
+                  })
+                }
+                className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
+              >
+                {t(language, 'shareAccountDetails')}
+              </button>
+            </>
+          ) : (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 text-center">
+              Waiting for seller ({deal.sellerName.split(' ')[0]}) to complete account handover.
+            </div>
+          )}
         </div>
       )}
 
-      {/* Screens 29 & 30: Deal Completion Prompt + Feedback & 5-Star Rating */}
+      {/* Screens 29 & 30: Review Feedback + Admin-Only Payout Release */}
       {(deal.status === 'review_prompt' || deal.status === 'done') && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
           <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold text-emerald-800 flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
-            <span>{t(language, 'dealDoneReview')}</span>
+            <span>
+              {deal.status === 'done'
+                ? t(language, 'dealDoneReview')
+                : 'Account handover complete! Submit your rating while Admin verifies & releases payout.'}
+            </span>
           </div>
+
+          {deal.accountDetailsNote && (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+              <span className="font-bold text-slate-900">Handover Note: </span>
+              <span>{deal.accountDetailsNote}</span>
+            </div>
+          )}
 
           {deal.status === 'done' ? (
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
@@ -707,64 +943,97 @@ export function DealRoomScreen({
             </div>
           ) : (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  {t(language, 'feedbackTitle')}
-                </h2>
-                <label
-                  htmlFor="deal-review-text"
-                  className="block text-xs font-semibold text-slate-600 mt-1 mb-1.5"
-                >
-                  {t(language, 'writeFeedback')}
-                </label>
-                <textarea
-                  id="deal-review-text"
-                  rows={3}
-                  value={reviewComment}
-                  onChange={(e) => setReviewComment(e.target.value)}
-                  placeholder={t(language, 'yourExperience')}
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl"
-                />
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold text-slate-600 mb-1.5">
-                  Rating
-                </div>
-                <div className="flex items-center gap-2">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setReviewRating(star)}
-                      aria-label={`Rate ${star} stars`}
-                      className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg hover:bg-slate-100"
+              {(isBuyer || isSeller) && (
+                <>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900">
+                      {t(language, 'feedbackTitle')}
+                    </h2>
+                    <label
+                      htmlFor="deal-review-text"
+                      className="block text-xs font-semibold text-slate-600 mt-1 mb-1.5"
                     >
-                      <Star
-                        className={`w-6 h-6 ${
-                          star <= reviewRating
-                            ? 'fill-amber-400 text-amber-400'
-                            : 'text-slate-300'
-                        }`}
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
+                      {t(language, 'writeFeedback')}
+                    </label>
+                    <textarea
+                      id="deal-review-text"
+                      rows={3}
+                      value={reviewComment}
+                      onChange={(e) => setReviewComment(e.target.value)}
+                      placeholder={t(language, 'yourExperience')}
+                      className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl"
+                    />
+                  </div>
 
-              <button
-                type="button"
-                onClick={() =>
-                  onCompleteReview(
-                    deal.id,
-                    reviewRating,
-                    reviewComment.trim() || 'Smooth and safe admin deal!'
-                  )
-                }
-                className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
-              >
-                {t(language, 'submitFeedback')}
-              </button>
+                  <div>
+                    <div className="text-xs font-semibold text-slate-600 mb-1.5">
+                      Rating
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setReviewRating(star)}
+                          aria-label={`Rate ${star} stars`}
+                          className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg hover:bg-slate-100"
+                        >
+                          <Star
+                            className={`w-6 h-6 ${
+                              star <= reviewRating
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'text-slate-300'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onCompleteReview(
+                        deal.id,
+                        reviewRating,
+                        reviewComment.trim() || 'Smooth and safe admin deal!'
+                      )
+                    }
+                    className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
+                  >
+                    {t(language, 'submitFeedback')}
+                  </button>
+                </>
+              )}
+
+              {deal.reviewComment && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900">
+                  Saved review ({deal.reviewRating ?? 5}★): &ldquo;{deal.reviewComment}&rdquo;
+                </div>
+              )}
+
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onReleasePayout
+                      ? onReleasePayout(deal.id)
+                      : onCompleteReview(
+                          deal.id,
+                          reviewRating,
+                          reviewComment.trim() || 'Escrow verified and payout released by admin.'
+                        )
+                  }
+                  className="w-full min-h-[46px] bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl inline-flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Release Payout &amp; Complete Deal</span>
+                </button>
+              ) : (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-medium text-amber-800 text-center">
+                  Awaiting Admin ({deal.adminName}) to release seller payout and finalize ledger statements.
+                </div>
+              )}
             </div>
           )}
         </div>

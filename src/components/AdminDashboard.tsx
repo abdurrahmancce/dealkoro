@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
@@ -7,8 +7,10 @@ import {
   Clock,
   Lock,
   Search,
+  Settings,
   ShieldCheck,
   ShoppingBag,
+  UserPlus,
   Users,
   Wallet,
 } from 'lucide-react';
@@ -19,6 +21,7 @@ import type {
   Language,
   Listing,
   NotificationItem,
+  PlatformEscrowConfig,
   StatementEntry,
   UserProfile,
 } from '../types/dealkoro';
@@ -30,9 +33,10 @@ import {
   isPendingPayoutDeal,
 } from '../utils/adminMetrics';
 import { calculateDealBreakdown, formatTk } from '../utils/dealMath';
+import { DEFAULT_PLATFORM_CONFIG, sanitizePlatformConfig } from '../utils/payloadSanitizer';
 import { ResilientImage } from './ResilientImage';
 
-type DashboardTab = 'overview' | 'deals' | 'payouts' | 'activity';
+type DashboardTab = 'overview' | 'deals' | 'payouts' | 'activity' | 'settings';
 
 interface AdminDashboardProps {
   user: UserProfile;
@@ -42,9 +46,13 @@ interface AdminDashboardProps {
   listings: Listing[];
   statements: StatementEntry[];
   notifications: NotificationItem[];
+  platformConfig?: PlatformEscrowConfig;
   onNavigate: (route: AppRoute) => void;
   onReassignAdmin: (dealId: string, adminId: string) => void;
+  onVerifyPayment?: (dealId: string) => void;
   onReleasePayout: (dealId: string) => void;
+  onSavePlatformConfig?: (config: PlatformEscrowConfig) => void;
+  onAddVerifiedAdmin?: (agent: AdminAgent) => void;
 }
 
 function formatShortTime(iso: string): string {
@@ -66,12 +74,38 @@ export function AdminDashboard({
   listings,
   statements,
   notifications,
+  platformConfig = DEFAULT_PLATFORM_CONFIG,
   onNavigate,
   onReassignAdmin,
+  onVerifyPayment,
   onReleasePayout,
+  onSavePlatformConfig,
+  onAddVerifiedAdmin,
 }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [searchQuery, setSearchQuery] = useState('');
+  const [bkashInput, setBkashInput] = useState(platformConfig.bkashNumber);
+  const [nagadInput, setNagadInput] = useState(platformConfig.nagadNumber);
+  const [labelInput, setLabelInput] = useState(platformConfig.escrowLabel);
+  const [noticeInput, setNoticeInput] = useState(platformConfig.announcement);
+  const [configSaved, setConfigSaved] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [newAdminUid, setNewAdminUid] = useState('');
+  const [newAdminName, setNewAdminName] = useState('');
+  const [newAdminSpecialty, setNewAdminSpecialty] = useState('eFootball & Cross-Method Escrow');
+  const [adminAddedMsg, setAdminAddedMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBkashInput(platformConfig.bkashNumber);
+    setNagadInput(platformConfig.nagadNumber);
+    setLabelInput(platformConfig.escrowLabel);
+    setNoticeInput(platformConfig.announcement);
+  }, [
+    platformConfig.bkashNumber,
+    platformConfig.nagadNumber,
+    platformConfig.escrowLabel,
+    platformConfig.announcement,
+  ]);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -270,6 +304,7 @@ export function AdminDashboard({
                 label: `${t(language, 'pendingPayouts')} (${pendingPayoutDeals.length})`,
               },
               { id: 'activity', label: t(language, 'platformActivity') },
+              { id: 'settings', label: t(language, 'escrowSettings') },
             ] as { id: DashboardTab; label: string }[]
           ).map((tab) => {
             const active = activeTab === tab.id;
@@ -491,14 +526,25 @@ export function AdminDashboard({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => onReleasePayout(deal.id)}
-                        className="min-h-[42px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap transition-colors"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>{t(language, 'releasePayout')}</span>
-                      </button>
+                      {deal.status === 'payment_instruction' && onVerifyPayment ? (
+                        <button
+                          type="button"
+                          onClick={() => onVerifyPayment(deal.id)}
+                          className="min-h-[42px] px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>Verify Payment</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onReleasePayout(deal.id)}
+                          className="min-h-[42px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>{t(language, 'releasePayout')}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -595,6 +641,254 @@ export function AdminDashboard({
                 </button>
               );
             })}
+          </div>
+        </section>
+      )}
+
+      {/* Section 4: Live Escrow Payment Settings & Admin Team */}
+      {activeTab === 'settings' && (
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-blue-600" />
+              <h2 className="text-base font-bold text-slate-900">
+                Official Escrow Payment Numbers
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500">
+              Buyers see these verified bKash &amp; Nagad numbers inside every deal room. Changes sync across all devices immediately.
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setConfigError(null);
+                setConfigSaved(false);
+                if (bkashInput.trim().length < 6 || nagadInput.trim().length < 6) {
+                  setConfigError('Please enter valid bKash and Nagad numbers (at least 6 digits).');
+                  return;
+                }
+                const nextCfg = sanitizePlatformConfig({
+                  bkashNumber: bkashInput,
+                  nagadNumber: nagadInput,
+                  escrowLabel: labelInput,
+                  announcement: noticeInput,
+                });
+                onSavePlatformConfig?.(nextCfg);
+                setConfigSaved(true);
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label htmlFor="cfg-bkash" className="block text-xs font-semibold text-slate-700 mb-1">
+                  bKash Number
+                </label>
+                <input
+                  id="cfg-bkash"
+                  type="text"
+                  value={bkashInput}
+                  onChange={(e) => setBkashInput(e.target.value)}
+                  placeholder="e.g. 01755-842190"
+                  className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="cfg-nagad" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nagad Number
+                </label>
+                <input
+                  id="cfg-nagad"
+                  type="text"
+                  value={nagadInput}
+                  onChange={(e) => setNagadInput(e.target.value)}
+                  placeholder="e.g. 01819-000000"
+                  className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="cfg-label" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Account Label (Personal / Merchant / Agent)
+                </label>
+                <input
+                  id="cfg-label"
+                  type="text"
+                  value={labelInput}
+                  onChange={(e) => setLabelInput(e.target.value)}
+                  placeholder="DEALKORO Official Escrow (Personal)"
+                  className="w-full min-h-[42px] px-3.5 py-2 text-sm border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="cfg-notice" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Deal Room Payment Notice
+                </label>
+                <textarea
+                  id="cfg-notice"
+                  rows={2}
+                  value={noticeInput}
+                  onChange={(e) => setNoticeInput(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              {configError && (
+                <div role="alert" className="p-2.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-xl">
+                  {configError}
+                </div>
+              )}
+
+              {configSaved && (
+                <div className="p-2.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  Official escrow payment numbers saved and synced live!
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors"
+              >
+                Save Escrow Numbers
+              </button>
+            </form>
+          </div>
+
+          <div className="space-y-4">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-emerald-600" />
+                <h2 className="text-base font-bold text-slate-900">
+                  Add Verified Admin Moderator
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500">
+                Only existing verified Admins can add moderators (locked in Firestore security rules).
+              </p>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-xs text-slate-700">
+                <div className="font-bold text-slate-900">How to add a moderator:</div>
+                <div>1. Moderator signs in once with Google.</div>
+                <div>2. They open <span className="font-semibold">Profile</span> and tap <span className="font-semibold">Copy UID</span>.</div>
+                <div>3. Paste their UID below &amp; click <span className="font-semibold">Add Verified Admin</span>.</div>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setAdminAddedMsg(null);
+                  if (!newAdminUid.trim() || !newAdminName.trim()) return;
+                  onAddVerifiedAdmin?.({
+                    uid: newAdminUid.trim(),
+                    name: newAdminName.trim(),
+                    verified: true,
+                    specialty: newAdminSpecialty.trim() || 'Verified Escrow Mediator',
+                    reviewNotes: 'Added as verified DEALKORO escrow mediator.',
+                    completedDeals: 0,
+                    rating: 5.0,
+                  });
+                  setAdminAddedMsg(`Added ${newAdminName.trim()} to verified admins.`);
+                  setNewAdminUid('');
+                  setNewAdminName('');
+                }}
+                className="space-y-3"
+              >
+                <div>
+                  <label htmlFor="adm-uid" className="block text-xs font-semibold text-slate-700 mb-1">
+                    Firebase User UID
+                  </label>
+                  <input
+                    id="adm-uid"
+                    type="text"
+                    value={newAdminUid}
+                    onChange={(e) => setNewAdminUid(e.target.value)}
+                    placeholder="e.g. 9fK2mP..."
+                    className="w-full min-h-[42px] px-3.5 py-2 text-xs font-mono border border-slate-300 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="adm-name" className="block text-xs font-semibold text-slate-700 mb-1">
+                    Admin Display Name
+                  </label>
+                  <input
+                    id="adm-name"
+                    type="text"
+                    value={newAdminName}
+                    onChange={(e) => setNewAdminName(e.target.value)}
+                    placeholder="Moderator Name"
+                    className="w-full min-h-[42px] px-3.5 py-2 text-sm border border-slate-300 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="adm-spec" className="block text-xs font-semibold text-slate-700 mb-1">
+                    Specialty
+                  </label>
+                  <input
+                    id="adm-spec"
+                    type="text"
+                    value={newAdminSpecialty}
+                    onChange={(e) => setNewAdminSpecialty(e.target.value)}
+                    className="w-full min-h-[42px] px-3.5 py-2 text-xs border border-slate-300 rounded-xl"
+                  />
+                </div>
+
+                {adminAddedMsg && (
+                  <div className="p-2.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    {adminAddedMsg}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full min-h-[42px] bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-colors"
+                >
+                  Add Verified Admin
+                </button>
+              </form>
+
+              <div className="pt-3 border-t border-slate-100 space-y-2">
+                <div className="text-xs font-bold text-slate-700">
+                  Verified Escrow Team ({admins.length})
+                </div>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {admins.map((a) => (
+                    <div
+                      key={a.uid}
+                      className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 truncate">{a.name} ✓</div>
+                        <div className="text-[11px] font-mono text-slate-500 truncate">
+                          UID: {a.uid}
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-semibold text-emerald-700 shrink-0">
+                        Verified
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 text-white rounded-2xl p-5 space-y-2.5 text-xs">
+              <div className="font-bold text-sm text-blue-400">
+                Production Launch Readiness
+              </div>
+              <div className="flex items-center justify-between py-1 border-b border-slate-800">
+                <span className="text-slate-300">Firebase Hosting Config</span>
+                <span className="font-semibold text-emerald-400">firebase.json Ready</span>
+              </div>
+              <div className="flex items-center justify-between py-1 border-b border-slate-800">
+                <span className="text-slate-300">Photo Upload Mode</span>
+                <span className="font-semibold text-emerald-400">Starter Tier Sync Ready</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-slate-300">Escrow Fee Engine</span>
+                <span className="font-semibold text-white">20 / 60 / +30 / +20 Tk</span>
+              </div>
+            </div>
           </div>
         </section>
       )}

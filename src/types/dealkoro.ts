@@ -62,6 +62,14 @@ export interface AdminAgent {
   rating: number;
 }
 
+export interface PlatformEscrowConfig {
+  bkashNumber: string;
+  nagadNumber: string;
+  escrowLabel: string;
+  announcement: string;
+  updatedAt: string;
+}
+
 export interface Listing {
   id: string;
   sellerId: string;
@@ -146,6 +154,7 @@ export interface AdminDeal {
   totalAmount: number;
   paymentContact: string;
   paymentProofNote: string;
+  paymentProofUrl?: string;
   buyerInitialDone: boolean;
   sellerExchanged: boolean;
   accountDetailsNote: string;

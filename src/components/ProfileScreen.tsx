@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import {
   Bookmark,
+  Check,
   ChevronRight,
+  Copy,
   FileText,
   HelpCircle,
   LogOut,
@@ -62,6 +64,13 @@ export function ProfileScreen({
   const [editPhone, setEditPhone] = useState(user.phone);
   const [editPayout, setEditPayout] = useState<PaymentMethod>(user.payoutMethod);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [copiedUid, setCopiedUid] = useState(false);
+
+  const handleCopyUid = () => {
+    navigator.clipboard?.writeText(user.uid);
+    setCopiedUid(true);
+    window.setTimeout(() => setCopiedUid(false), 2000);
+  };
 
   // Screen 08: Your Posts List
   if (subScreen === 'your_posts') {
@@ -250,6 +259,20 @@ export function ProfileScreen({
           <div className="font-semibold text-slate-900">Primary Contact</div>
           <div className="text-slate-600">{user.email}</div>
           <div className="text-slate-600">{user.phone}</div>
+          <div className="pt-2 mt-2 border-t border-slate-200 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold text-slate-500">Account UID</div>
+              <div className="text-xs font-mono text-slate-800 truncate">{user.uid}</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleCopyUid}
+              className="min-h-[34px] px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 inline-flex items-center gap-1 shrink-0"
+            >
+              {copiedUid ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedUid ? 'Copied' : 'Copy UID'}</span>
+            </button>
+          </div>
         </div>
         <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
           Escrow Deal Verification is active. Never share Konami or Google credentials outside an official Admin Deal group chat.
@@ -410,8 +433,23 @@ export function ProfileScreen({
 
         <h1 className="mt-4 text-xl font-bold text-slate-900">{user.displayName}</h1>
         <div className="mt-1 text-xs font-medium text-slate-500">{user.email}</div>
+        <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-200 rounded-xl">
+          <span className="text-[11px] text-slate-500 font-medium">UID:</span>
+          <span className="text-[11px] font-mono text-slate-800 max-w-[170px] truncate">
+            {user.uid}
+          </span>
+          <button
+            type="button"
+            onClick={handleCopyUid}
+            aria-label="Copy Account UID"
+            className="text-[11px] font-bold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
+          >
+            {copiedUid ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+            <span>{copiedUid ? 'Copied' : 'Copy UID'}</span>
+          </button>
+        </div>
 
-        <div className="mt-2 inline-flex items-center gap-1.5 text-sm font-bold text-slate-900 tabular-nums">
+        <div className="mt-2 flex items-center justify-center gap-1.5 text-sm font-bold text-slate-900 tabular-nums">
           <div className="flex items-center gap-0.5">
             {Array.from({ length: 5 }).map((_, i) => (
               <Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />
