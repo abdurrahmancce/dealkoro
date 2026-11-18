@@ -67,6 +67,10 @@ export interface AdminAgent {
 export interface PlatformEscrowConfig {
   bkashNumber: string;
   nagadNumber: string;
+  bkashAccountType?: 'Personal' | 'Merchant' | 'Agent';
+  nagadAccountType?: 'Personal' | 'Merchant' | 'Agent';
+  bkashPaymentLink?: string;
+  nagadPaymentLink?: string;
   escrowLabel: string;
   announcement: string;
   updatedAt: string;

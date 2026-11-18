@@ -1009,6 +1009,7 @@ export default function App() {
       {currentRoute.screen === 'home' && (
         <HomeFeedScreen
           language={state.language}
+          theme={theme}
           listings={state.listings}
           bookmarks={state.bookmarks}
           onToggleBookmark={handleToggleBookmark}

@@ -22,6 +22,7 @@ import {
 import type { AppRoute, Language, ThemeMode, UserProfile } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { ResilientImage } from './ResilientImage';
+import { OfflineIndicator, PWAInstallButton } from './PWAInstallButton';
 
 interface AppShellProps {
   user: UserProfile;
@@ -277,6 +278,7 @@ export function AppShell({
         </nav>
 
         <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+          <PWAInstallButton language={language} showGuideFallback />
           <button
             type="button"
             onClick={() => onToggleTheme()}
@@ -503,8 +505,9 @@ export function AppShell({
               </nav>
             </div>
 
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400 dark:text-slate-500">
-              {t(language, 'appVersion')}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2.5 text-xs text-slate-400 dark:text-slate-500">
+              <PWAInstallButton language={language} showGuideFallback />
+              <div>{t(language, 'appVersion')}</div>
             </div>
           </div>
         </div>
@@ -578,6 +581,7 @@ export function AppShell({
           </button>
         ))}
       </nav>
+      <OfflineIndicator language={language} />
     </div>
   );
 }

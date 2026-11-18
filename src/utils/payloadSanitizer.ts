@@ -83,15 +83,35 @@ export function normalizePaymentMethod(val: string): PaymentMethod {
 export const DEFAULT_PLATFORM_CONFIG = {
   bkashNumber: '01755-842190',
   nagadNumber: '01755-842190',
+  bkashAccountType: 'Personal' as const,
+  nagadAccountType: 'Personal' as const,
+  bkashPaymentLink: '',
+  nagadPaymentLink: '',
   escrowLabel: 'DEALKORO Official Escrow',
   announcement:
     'Send escrow funds only to the verified bKash or Nagad number shown inside your active deal room.',
   updatedAt: '2026-11-18T00:00:00Z',
 };
 
+function normalizeWalletType(raw?: string): 'Personal' | 'Merchant' | 'Agent' {
+  if (raw === 'Merchant' || raw === 'Agent') return raw;
+  return 'Personal';
+}
+
+function sanitizeHttpsPaymentLink(raw?: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (!trimmed || !trimmed.startsWith('https://')) return '';
+  return trimmed.slice(0, 240);
+}
+
 export function sanitizePlatformConfig(input: {
   bkashNumber?: string;
   nagadNumber?: string;
+  bkashAccountType?: string;
+  nagadAccountType?: string;
+  bkashPaymentLink?: string;
+  nagadPaymentLink?: string;
   escrowLabel?: string;
   announcement?: string;
   updatedAt?: string;
@@ -107,6 +127,10 @@ export function sanitizePlatformConfig(input: {
       32,
       DEFAULT_PLATFORM_CONFIG.nagadNumber
     ),
+    bkashAccountType: normalizeWalletType(input.bkashAccountType),
+    nagadAccountType: normalizeWalletType(input.nagadAccountType),
+    bkashPaymentLink: sanitizeHttpsPaymentLink(input.bkashPaymentLink),
+    nagadPaymentLink: sanitizeHttpsPaymentLink(input.nagadPaymentLink),
     escrowLabel: clampText(
       input.escrowLabel ?? DEFAULT_PLATFORM_CONFIG.escrowLabel,
       BLUEPRINT_LIMITS.NAME_MAX,

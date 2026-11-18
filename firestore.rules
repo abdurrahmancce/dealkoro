@@ -243,10 +243,14 @@ service cloud.firestore {
 
     function isValidPlatformConfig(data, configId) {
       return data.keys().hasAll(['id', 'bkashNumber', 'nagadNumber', 'escrowLabel', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'bkashNumber', 'nagadNumber', 'escrowLabel', 'announcement', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'bkashNumber', 'nagadNumber', 'bkashAccountType', 'nagadAccountType', 'bkashPaymentLink', 'nagadPaymentLink', 'escrowLabel', 'announcement', 'updatedAt'])
         && data.id == configId
         && data.bkashNumber is string && data.bkashNumber.size() >= 6 && data.bkashNumber.size() <= 32
         && data.nagadNumber is string && data.nagadNumber.size() >= 6 && data.nagadNumber.size() <= 32
+        && (!('bkashAccountType' in data) || (data.bkashAccountType in ['Personal', 'Merchant', 'Agent']))
+        && (!('nagadAccountType' in data) || (data.nagadAccountType in ['Personal', 'Merchant', 'Agent']))
+        && (!('bkashPaymentLink' in data) || (data.bkashPaymentLink is string && data.bkashPaymentLink.size() <= 240 && (data.bkashPaymentLink == '' || data.bkashPaymentLink.matches('^https://.*'))))
+        && (!('nagadPaymentLink' in data) || (data.nagadPaymentLink is string && data.nagadPaymentLink.size() <= 240 && (data.nagadPaymentLink == '' || data.nagadPaymentLink.matches('^https://.*'))))
         && data.escrowLabel is string && data.escrowLabel.size() >= 2 && data.escrowLabel.size() <= 80
         && (!('announcement' in data) || (data.announcement is string && data.announcement.size() <= 240))
         && data.updatedAt == request.time;

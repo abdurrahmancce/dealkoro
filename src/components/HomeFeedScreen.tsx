@@ -7,14 +7,16 @@ import {
   ShieldCheck,
   Star,
 } from 'lucide-react';
-import type { Language, Listing, ListingCategory } from '../types/dealkoro';
+import type { Language, Listing, ListingCategory, ThemeMode } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { ASSETS } from '../data/seedData';
 import { formatTk, sortListings, type ListingSortOption } from '../utils/dealMath';
 import { ResilientImage } from './ResilientImage';
+import { MarketPriceTrendChart } from './MarketPriceTrendChart';
 
 interface HomeFeedScreenProps {
   language: Language;
+  theme: ThemeMode;
   listings: Listing[];
   bookmarks: string[];
   onToggleBookmark: (listingId: string) => void;
@@ -33,6 +35,7 @@ const CATEGORIES: ('All' | ListingCategory)[] = [
 
 export function HomeFeedScreen({
   language,
+  theme,
   listings,
   bookmarks,
   onToggleBookmark,
@@ -89,6 +92,14 @@ export function HomeFeedScreen({
           </div>
         </div>
       </section>
+
+      {/* 30-Day Market Price Trend Chart */}
+      <MarketPriceTrendChart
+        listings={activeListings}
+        category={selectedCategory}
+        language={language}
+        theme={theme}
+      />
 
       {/* Interactive Category Segmented Filter + Sort */}
       <section aria-label="Game categories">

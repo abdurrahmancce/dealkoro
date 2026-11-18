@@ -9,14 +9,16 @@
     "preview": "vite preview --port=3000 --host=0.0.0.0",
     "start": "vite preview --port=3000 --host=0.0.0.0",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/dealMath.test.ts src/utils/adminMetrics.test.ts src/utils/payloadSanitizer.test.ts"
+    "test": "tsx --test src/utils/dealMath.test.ts src/utils/adminMetrics.test.ts src/utils/payloadSanitizer.test.ts src/utils/priceTrends.test.ts src/utils/paymentGateway.test.ts"
   },
   "dependencies": {
     "firebase": "^11.6.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
-    "react-dom": "^19.0.1"
+    "react-dom": "^19.0.1",
+    "recharts": "^3.11.0",
+    "vite-plugin-pwa": "^2.0.0"
   },
   "devDependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",

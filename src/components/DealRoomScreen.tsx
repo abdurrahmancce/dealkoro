@@ -29,6 +29,7 @@ import {
   sanitizeImageUrl,
 } from '../utils/payloadSanitizer';
 import { ResilientImage } from './ResilientImage';
+import { OnlineWalletCheckout } from './OnlineWalletCheckout';
 
 interface DealRoomScreenProps {
   user: UserProfile;
@@ -795,116 +796,24 @@ export function DealRoomScreen({
           </div>
 
           {(isBuyer || isAdmin) && (
-            <div className="space-y-3">
-              <div>
-                <label
-                  htmlFor="payment-proof-input"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
-                >
-                  Payment Proof (Transaction ID / Reference)
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="payment-proof-input"
-                    type="text"
-                    value={proofNote}
-                    onChange={(e) => setProofNote(e.target.value)}
-                    placeholder="e.g. TrxID 8N4K2P19"
-                    className="flex-1 min-h-[44px] px-3.5 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 rounded-xl"
-                  />
-                  <label className="min-h-[44px] px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer">
-                    {uploadingProof ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Upload className="w-4 h-4" />
-                    )}
-                    <span>{uploadingProof ? 'Uploading...' : 'Photo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      disabled={uploadingProof}
-                      className="sr-only"
-                      onChange={(e) => void handleProofUpload(e)}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {proofUrl.startsWith('data:') ? (
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-xl flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-16 h-12 rounded-lg overflow-hidden border border-emerald-200 dark:border-emerald-800 bg-slate-900 shrink-0">
-                      <ResilientImage
-                        src={proofUrl}
-                        alt="Attached payment proof"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-                      Payment screenshot attached &amp; ready
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setProofUrl('')}
-                    className="px-2.5 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <label
-                    htmlFor="payment-proof-url"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Optional Proof Screenshot HTTPS Link
-                  </label>
-                  <input
-                    id="payment-proof-url"
-                    type="url"
-                    value={proofUrl}
-                    onChange={(e) => setProofUrl(e.target.value)}
-                    maxLength={BLUEPRINT_LIMITS.URL_MAX}
-                    placeholder="https://..."
-                    className="w-full min-h-[40px] px-3.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  />
-                </div>
-              )}
-
-              {proofError && (
-                <div
-                  role="alert"
-                  className="p-2.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-xl"
-                >
-                  {proofError}
-                </div>
-              )}
-
-              <button
-                type="button"
-                disabled={uploadingProof}
-                onClick={() => {
-                  const trimmedUrl = proofUrl.trim();
-                  setProofError(null);
-                  const cleanUrl = trimmedUrl
-                    ? sanitizeImageUrl(trimmedUrl, '')
-                    : '';
-                  if (trimmedUrl && !cleanUrl) {
-                    setProofError('Use the Photo button to upload a screenshot or paste a valid HTTPS link.');
-                    return;
-                  }
-                  applyDirectPatch({
-                    paymentProofNote:
-                      proofNote.trim() || 'Buyer payment proof submitted (pending admin check)',
-                    paymentProofUrl: cleanUrl,
-                  });
-                }}
-                className="w-full min-h-[46px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl disabled:opacity-60"
-              >
-                {t(language, 'submitPaymentProof')}
-              </button>
-            </div>
+            <OnlineWalletCheckout
+              language={language}
+              userId={user.uid}
+              deal={deal}
+              totalPayable={breakdown.totalPayable}
+              platformConfig={platformConfig}
+              initialProofNote={deal.paymentProofNote}
+              initialProofUrl={deal.paymentProofUrl}
+              onSubmitProof={({ method, proofNote: note, proofUrl: url }) => {
+                applyDirectPatch({
+                  paymentProofNote: note,
+                  paymentProofUrl: url,
+                });
+                onSendGroupMessage(
+                  `${method} Online Payment submitted: ${note}`
+                );
+              }}
+            />
           )}
 
           {deal.paymentProofNote && (

@@ -235,12 +235,16 @@
     },
     "PlatformEscrowConfig": {
       "title": "PlatformEscrowConfig",
-      "description": "Official DEALKORO bKash/Nagad escrow payment numbers and notice configured by Admins.",
+      "description": "Official DEALKORO bKash/Nagad escrow payment numbers, online merchant links, and notice configured by Admins.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "bkashNumber": { "type": "string", "minLength": 6, "maxLength": 32 },
         "nagadNumber": { "type": "string", "minLength": 6, "maxLength": 32 },
+        "bkashAccountType": { "type": "string", "enum": ["Personal", "Merchant", "Agent"] },
+        "nagadAccountType": { "type": "string", "enum": ["Personal", "Merchant", "Agent"] },
+        "bkashPaymentLink": { "type": "string", "maxLength": 240 },
+        "nagadPaymentLink": { "type": "string", "maxLength": 240 },
         "escrowLabel": { "type": "string", "minLength": 2, "maxLength": 80 },
         "announcement": { "type": "string", "maxLength": 240 },
         "updatedAt": { "type": "string", "format": "date-time" }

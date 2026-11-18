@@ -91,6 +91,14 @@ export function AdminDashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [bkashInput, setBkashInput] = useState(platformConfig.bkashNumber);
   const [nagadInput, setNagadInput] = useState(platformConfig.nagadNumber);
+  const [bkashTypeInput, setBkashTypeInput] = useState<'Personal' | 'Merchant' | 'Agent'>(
+    platformConfig.bkashAccountType ?? 'Personal'
+  );
+  const [nagadTypeInput, setNagadTypeInput] = useState<'Personal' | 'Merchant' | 'Agent'>(
+    platformConfig.nagadAccountType ?? 'Personal'
+  );
+  const [bkashLinkInput, setBkashLinkInput] = useState(platformConfig.bkashPaymentLink ?? '');
+  const [nagadLinkInput, setNagadLinkInput] = useState(platformConfig.nagadPaymentLink ?? '');
   const [labelInput, setLabelInput] = useState(platformConfig.escrowLabel);
   const [noticeInput, setNoticeInput] = useState(platformConfig.announcement);
   const [configSaved, setConfigSaved] = useState(false);
@@ -104,11 +112,19 @@ export function AdminDashboard({
   useEffect(() => {
     setBkashInput(platformConfig.bkashNumber);
     setNagadInput(platformConfig.nagadNumber);
+    setBkashTypeInput(platformConfig.bkashAccountType ?? 'Personal');
+    setNagadTypeInput(platformConfig.nagadAccountType ?? 'Personal');
+    setBkashLinkInput(platformConfig.bkashPaymentLink ?? '');
+    setNagadLinkInput(platformConfig.nagadPaymentLink ?? '');
     setLabelInput(platformConfig.escrowLabel);
     setNoticeInput(platformConfig.announcement);
   }, [
     platformConfig.bkashNumber,
     platformConfig.nagadNumber,
+    platformConfig.bkashAccountType,
+    platformConfig.nagadAccountType,
+    platformConfig.bkashPaymentLink,
+    platformConfig.nagadPaymentLink,
     platformConfig.escrowLabel,
     platformConfig.announcement,
   ]);
@@ -673,6 +689,10 @@ export function AdminDashboard({
                 const nextCfg = sanitizePlatformConfig({
                   bkashNumber: bkashInput,
                   nagadNumber: nagadInput,
+                  bkashAccountType: bkashTypeInput,
+                  nagadAccountType: nagadTypeInput,
+                  bkashPaymentLink: bkashLinkInput,
+                  nagadPaymentLink: nagadLinkInput,
                   escrowLabel: labelInput,
                   announcement: noticeInput,
                 });
@@ -681,37 +701,115 @@ export function AdminDashboard({
               }}
               className="space-y-3"
             >
-              <div>
-                <label
-                  htmlFor="cfg-bkash"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                >
-                  bKash Number
-                </label>
-                <input
-                  id="cfg-bkash"
-                  type="text"
-                  value={bkashInput}
-                  onChange={(e) => setBkashInput(e.target.value)}
-                  placeholder="e.g. 01755-842190"
-                  className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2.5">
+                <div>
+                  <label
+                    htmlFor="cfg-bkash"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    bKash Number
+                  </label>
+                  <input
+                    id="cfg-bkash"
+                    type="text"
+                    value={bkashInput}
+                    onChange={(e) => setBkashInput(e.target.value)}
+                    placeholder="e.g. 01755-842190"
+                    className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="cfg-bkash-type"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    bKash Type
+                  </label>
+                  <select
+                    id="cfg-bkash-type"
+                    value={bkashTypeInput}
+                    onChange={(e) =>
+                      setBkashTypeInput(e.target.value as 'Personal' | 'Merchant' | 'Agent')
+                    }
+                    className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                  >
+                    <option value="Personal">Personal</option>
+                    <option value="Merchant">Merchant</option>
+                    <option value="Agent">Agent</option>
+                  </select>
+                </div>
               </div>
 
               <div>
                 <label
-                  htmlFor="cfg-nagad"
+                  htmlFor="cfg-bkash-link"
                   className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
                 >
-                  Nagad Number
+                  bKash Online Payment Link (Optional HTTPS)
                 </label>
                 <input
-                  id="cfg-nagad"
-                  type="text"
-                  value={nagadInput}
-                  onChange={(e) => setNagadInput(e.target.value)}
-                  placeholder="e.g. 01819-000000"
-                  className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                  id="cfg-bkash-link"
+                  type="url"
+                  value={bkashLinkInput}
+                  onChange={(e) => setBkashLinkInput(e.target.value)}
+                  placeholder="https://shop.bkash.com/..."
+                  className="w-full min-h-[40px] px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2.5">
+                <div>
+                  <label
+                    htmlFor="cfg-nagad"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Nagad Number
+                  </label>
+                  <input
+                    id="cfg-nagad"
+                    type="text"
+                    value={nagadInput}
+                    onChange={(e) => setNagadInput(e.target.value)}
+                    placeholder="e.g. 01819-000000"
+                    className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="cfg-nagad-type"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Nagad Type
+                  </label>
+                  <select
+                    id="cfg-nagad-type"
+                    value={nagadTypeInput}
+                    onChange={(e) =>
+                      setNagadTypeInput(e.target.value as 'Personal' | 'Merchant' | 'Agent')
+                    }
+                    className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                  >
+                    <option value="Personal">Personal</option>
+                    <option value="Merchant">Merchant</option>
+                    <option value="Agent">Agent</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="cfg-nagad-link"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                >
+                  Nagad Online Payment Link (Optional HTTPS)
+                </label>
+                <input
+                  id="cfg-nagad-link"
+                  type="url"
+                  value={nagadLinkInput}
+                  onChange={(e) => setNagadLinkInput(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full min-h-[40px] px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
                 />
               </div>
 

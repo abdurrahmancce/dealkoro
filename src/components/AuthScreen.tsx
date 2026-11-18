@@ -3,6 +3,7 @@ import { CheckCircle2, Lock, Moon, ShieldCheck, Sun, Wallet } from 'lucide-react
 import type { Language, ThemeMode } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { BOOTSTRAP_ADMIN_EMAIL } from '../services/dealkoroService';
+import { OfflineIndicator, PWAInstallButton } from './PWAInstallButton';
 
 interface AuthScreenProps {
   language: Language;
@@ -212,9 +213,13 @@ export function AuthScreen({
                 bKash · Nagad · Cross Deal
               </span>
             </div>
+            <div className="pt-2">
+              <PWAInstallButton language={language} showGuideFallback />
+            </div>
           </div>
         </div>
       </main>
+      <OfflineIndicator language={language} />
     </div>
   );
 }
