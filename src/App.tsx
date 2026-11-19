@@ -1140,6 +1140,7 @@ export default function App() {
         <AdminDashboard
           user={user}
           language={state.language}
+          theme={theme}
           admins={state.admins}
           deals={state.deals}
           listings={state.listings}

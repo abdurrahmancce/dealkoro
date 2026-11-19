@@ -26,6 +26,7 @@ import type {
   NotificationItem,
   PlatformEscrowConfig,
   StatementEntry,
+  ThemeMode,
   UserProfile,
 } from '../types/dealkoro';
 import { t } from '../i18n/translations';
@@ -37,6 +38,7 @@ import {
 } from '../utils/adminMetrics';
 import { calculateDealBreakdown, formatTk } from '../utils/dealMath';
 import { DEFAULT_PLATFORM_CONFIG, sanitizePlatformConfig } from '../utils/payloadSanitizer';
+import { CategoryRevenueChart } from './CategoryRevenueChart';
 import { ResilientImage } from './ResilientImage';
 
 type DashboardTab = 'overview' | 'deals' | 'payouts' | 'activity' | 'settings';
@@ -44,6 +46,7 @@ type DashboardTab = 'overview' | 'deals' | 'payouts' | 'activity' | 'settings';
 interface AdminDashboardProps {
   user: UserProfile;
   language: Language;
+  theme?: ThemeMode;
   admins: AdminAgent[];
   deals: AdminDeal[];
   listings: Listing[];
@@ -73,6 +76,7 @@ function formatShortTime(iso: string): string {
 export function AdminDashboard({
   user,
   language,
+  theme = 'light',
   admins,
   deals,
   listings,
@@ -361,6 +365,17 @@ export function AdminDashboard({
           />
         </div>
       </div>
+
+      {/* Category Escrow Fee Income Breakdown */}
+      {activeTab === 'overview' && (
+        <CategoryRevenueChart
+          deals={deals}
+          listings={listings}
+          statements={statements}
+          language={language}
+          theme={theme}
+        />
+      )}
 
       {/* Section 1: Active Deals */}
       {showDeals && (
