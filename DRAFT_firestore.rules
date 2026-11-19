@@ -34,8 +34,12 @@ service cloud.firestore {
       return isVerifiedUser() && request.auth.token.email == 'akash.abdur.2002@gmail.com';
     }
 
+    function isMainAdmin() {
+      return isBootstrapAdmin();
+    }
+
     function isAdmin() {
-      return isBootstrapAdmin() || (
+      return isMainAdmin() || (
         isVerifiedUser() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
@@ -76,14 +80,83 @@ service cloud.firestore {
 
     function isValidAdminAgent(data, adminId) {
       return data.keys().hasAll(['uid', 'name', 'verified', 'reviewNotes', 'completedDeals', 'rating'])
-        && data.keys().hasOnly(['uid', 'name', 'verified', 'specialty', 'reviewNotes', 'completedDeals', 'rating'])
+        && data.keys().hasOnly([
+          'uid', 'name', 'verified', 'staffRole', 'email', 'phoneMasked',
+          'idType', 'idLast4', 'appointedBy', 'inviteId', 'verificationBadges',
+          'specialty', 'reviewNotes', 'completedDeals', 'rating'
+        ])
         && data.uid == adminId
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
         && data.verified is bool
+        && (!('staffRole' in data) || (data.staffRole in ['main_admin', 'sub_admin', 'moderator']))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+        && (!('phoneMasked' in data) || (data.phoneMasked is string && data.phoneMasked.size() <= 32))
+        && (!('idType' in data) || (data.idType in ['NID', 'Passport', 'StudentID']))
+        && (!('idLast4' in data) || (data.idLast4 is string && data.idLast4.size() <= 8))
+        && (!('appointedBy' in data) || (data.appointedBy is string && data.appointedBy.size() <= 128))
+        && (!('inviteId' in data) || (data.inviteId is string && data.inviteId.size() <= 128))
+        && (!('verificationBadges' in data) || (
+          data.verificationBadges is map &&
+          data.verificationBadges.keys().hasOnly(['emailVerified', 'mobileVerified', 'idVerified'])
+        ))
         && (!('specialty' in data) || (data.specialty is string && data.specialty.size() <= 160))
         && data.reviewNotes is string && data.reviewNotes.size() <= 500
         && data.completedDeals is number && data.completedDeals >= 0
         && data.rating is number && data.rating >= 0 && data.rating <= 5;
+    }
+
+    function isValidTeamInvite(data, inviteId) {
+      return data.keys().hasAll([
+          'id', 'candidateEmail', 'candidateName', 'candidatePhone',
+          'idType', 'idLast4', 'staffRole', 'verificationCode',
+          'status', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'candidateEmail', 'candidateName', 'candidatePhone',
+          'idType', 'idLast4', 'staffRole', 'specialty',
+          'verificationCode', 'status', 'createdBy', 'claimedUid',
+          'createdAt', 'updatedAt'
+        ])
+        && data.id == inviteId
+        && data.candidateEmail is string && data.candidateEmail.size() >= 5 && data.candidateEmail.size() <= 160
+        && data.candidateName is string && data.candidateName.size() >= 1 && data.candidateName.size() <= 80
+        && data.candidatePhone is string && data.candidatePhone.size() >= 6 && data.candidatePhone.size() <= 32
+        && data.idType in ['NID', 'Passport', 'StudentID']
+        && data.idLast4 is string && data.idLast4.size() >= 2 && data.idLast4.size() <= 8
+        && data.staffRole in ['sub_admin', 'moderator']
+        && (!('specialty' in data) || (data.specialty is string && data.specialty.size() <= 160))
+        && data.verificationCode is string && data.verificationCode.size() >= 6 && data.verificationCode.size() <= 12
+        && data.status in ['pending', 'verified', 'revoked']
+        && isValidId(data.createdBy)
+        && (!('claimedUid' in data) || (data.claimedUid is string && data.claimedUid.size() <= 128))
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPaymentSession(data, sessionId) {
+      return data.keys().hasAll([
+          'id', 'dealId', 'buyerId', 'method', 'amount', 'mode',
+          'status', 'gatewayPaymentId', 'expiresAt', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'dealId', 'buyerId', 'method', 'amount', 'mode',
+          'status', 'gatewayPaymentId', 'trxId', 'senderMasked',
+          'redirectUrl', 'expiresAt', 'createdAt', 'updatedAt'
+        ])
+        && data.id == sessionId
+        && isValidId(data.dealId)
+        && isValidId(data.buyerId)
+        && data.method in ['bKash', 'Nagad']
+        && data.amount is number && data.amount >= 1 && data.amount <= 1000000
+        && data.mode in ['live_api', 'sandbox']
+        && data.status in ['initiated', 'authorized', 'verified', 'failed', 'expired']
+        && data.gatewayPaymentId is string && data.gatewayPaymentId.size() >= 1 && data.gatewayPaymentId.size() <= 128
+        && (!('trxId' in data) || (data.trxId is string && data.trxId.size() <= 32))
+        && (!('senderMasked' in data) || (data.senderMasked is string && data.senderMasked.size() <= 32))
+        && (!('redirectUrl' in data) || (data.redirectUrl is string && data.redirectUrl.size() <= 512))
+        && data.expiresAt is string && data.expiresAt.size() >= 10 && data.expiresAt.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
     }
 
     function isValidListing(data, listingId) {
@@ -281,12 +354,60 @@ service cloud.firestore {
       }
     }
 
-    // Verified admin mediators
+    // Verified admin mediators (Main Admin appoints/updates/deletes; invited staff self-claim atomically)
     match /admins/{adminId} {
       allow get: if isValidId(adminId) && isSignedIn();
-      allow list: if isSignedIn();
-      allow create, update: if isValidId(adminId) && isAdmin() && isValidAdminAgent(incoming(), adminId);
-      allow delete: if isValidId(adminId) && isAdmin() && adminId != 'admin_abdur' && adminId != request.auth.uid;
+      allow list: if isSignedIn() && resource.data.verified in [true, false];
+      allow create: if isValidId(adminId)
+        && isValidAdminAgent(incoming(), adminId)
+        && (
+          isMainAdmin() ||
+          (
+            isVerifiedUser()
+            && adminId == request.auth.uid
+            && incoming().staffRole in ['sub_admin', 'moderator']
+            && 'inviteId' in incoming()
+            && incoming().inviteId is string
+            && isValidId(incoming().inviteId)
+            && getAfter(/databases/$(database)/documents/teamInvites/$(incoming().inviteId)).data.status == 'verified'
+            && getAfter(/databases/$(database)/documents/teamInvites/$(incoming().inviteId)).data.claimedUid == request.auth.uid
+            && getAfter(/databases/$(database)/documents/teamInvites/$(incoming().inviteId)).data.staffRole == incoming().staffRole
+            && getAfter(/databases/$(database)/documents/teamInvites/$(incoming().inviteId)).data.candidateEmail == request.auth.token.email
+          )
+        );
+      allow update: if isValidId(adminId) && isMainAdmin() && isValidAdminAgent(incoming(), adminId);
+      allow delete: if isValidId(adminId) && isMainAdmin() && adminId != 'admin_abdur' && adminId != request.auth.uid;
+    }
+
+    // Smart verification invitations issued exclusively by Main Project Admin
+    match /teamInvites/{inviteId} {
+      allow get: if isValidId(inviteId) && (isMainAdmin() || (isVerifiedUser() && existing().candidateEmail == request.auth.token.email));
+      allow list: if isMainAdmin() || (isVerifiedUser() && resource.data.candidateEmail == request.auth.token.email);
+      allow create: if isValidId(inviteId)
+        && isMainAdmin()
+        && isValidTeamInvite(incoming(), inviteId)
+        && incoming().status == 'pending'
+        && incoming().createdBy == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(inviteId)
+        && isValidTeamInvite(incoming(), inviteId)
+        && incoming().candidateEmail == existing().candidateEmail
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdAt == existing().createdAt
+        && (
+          isMainAdmin() ||
+          (
+            isVerifiedUser()
+            && existing().status == 'pending'
+            && incoming().status == 'verified'
+            && existing().candidateEmail == request.auth.token.email
+            && incoming().claimedUid == request.auth.uid
+            && incoming().staffRole == existing().staffRole
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'claimedUid', 'updatedAt'])
+            && existsAfter(/databases/$(database)/documents/admins/$(request.auth.uid))
+          )
+        );
+      allow delete: if isValidId(inviteId) && isMainAdmin();
     }
 
     // Public marketplace listings
@@ -475,11 +596,37 @@ service cloud.firestore {
       allow create: if isValidId(statementId) && isVerifiedUser() && isValidStatement(incoming(), statementId) && isAdmin();
     }
 
-    // Platform escrow payment settings (readable by signed-in traders, writable only by verified Admins)
+    // Platform escrow payment settings (readable by signed-in traders, writable only by Main Project Admin)
     match /platformConfig/{configId} {
       allow get: if isValidId(configId) && isSignedIn();
-      allow list: if isSignedIn();
-      allow create, update: if isValidId(configId) && isAdmin() && isValidPlatformConfig(incoming(), configId);
+      allow list: if isSignedIn() && resource.data.id == 'escrow';
+      allow create, update: if isValidId(configId) && isMainAdmin() && isValidPlatformConfig(incoming(), configId);
+    }
+
+    // Real-time bKash/Nagad gateway checkout sessions
+    match /paymentSessions/{sessionId} {
+      allow get: if isValidId(sessionId) && isSignedIn() && (existing().buyerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.buyerId == request.auth.uid || isMainAdmin());
+      allow create: if isValidId(sessionId)
+        && isVerifiedUser()
+        && isValidPaymentSession(incoming(), sessionId)
+        && incoming().buyerId == request.auth.uid
+        && exists(/databases/$(database)/documents/deals/$(incoming().dealId))
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(sessionId)
+        && isValidPaymentSession(incoming(), sessionId)
+        && incoming().buyerId == existing().buyerId
+        && incoming().dealId == existing().dealId
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          (
+            isVerifiedUser()
+            && existing().buyerId == request.auth.uid
+            && !(existing().status in ['verified', 'expired'])
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'trxId', 'senderMasked', 'updatedAt'])
+          )
+        );
     }
   }
 }

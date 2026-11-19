@@ -160,3 +160,52 @@ export function formatEscrowPaymentContact(
   }
   return clampText(raw, BLUEPRINT_LIMITS.TITLE_MAX);
 }
+
+export function isValidEmail(raw: string): boolean {
+  const trimmed = raw.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed) && trimmed.length <= 160;
+}
+
+export function normalizeBdMobile(raw: string): string {
+  const digits = raw.replace(/[^\d]/g, '');
+  if (digits.startsWith('8801') && digits.length === 13) {
+    return digits.slice(2);
+  }
+  return digits;
+}
+
+export function maskBdPhone(raw: string): string {
+  const normalized = normalizeBdMobile(raw);
+  if (normalized.length < 7) return clampText(raw, 32, '017**-******');
+  return `${normalized.slice(0, 3)}****${normalized.slice(-4)}`;
+}
+
+export function sanitizeIdLast4(raw: string): string {
+  const cleaned = raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (cleaned.length <= 4) return cleaned;
+  return cleaned.slice(-4);
+}
+
+export function generateSmartVerificationCode(): string {
+  const code = Math.floor(100000 + Math.random() * 900000);
+  return String(code);
+}
+
+export function normalizeStaffRole(
+  raw?: string,
+  email?: string
+): 'main_admin' | 'sub_admin' | 'moderator' {
+  if (email && email.trim().toLowerCase() === 'akash.abdur.2002@gmail.com') {
+    return 'main_admin';
+  }
+  if (raw === 'main_admin' || raw === 'sub_admin' || raw === 'moderator') {
+    return raw;
+  }
+  return 'sub_admin';
+}
+
+export function formatStaffRoleLabel(role?: string): string {
+  if (role === 'main_admin') return 'Main Project Admin';
+  if (role === 'moderator') return 'Moderator';
+  return 'Sub-Admin';
+}

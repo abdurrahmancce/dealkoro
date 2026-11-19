@@ -4,6 +4,10 @@ export type ThemeMode = 'light' | 'dark';
 
 export type UserRole = 'user' | 'admin';
 
+export type StaffRole = 'main_admin' | 'sub_admin' | 'moderator';
+
+export type AdminIdType = 'NID' | 'Passport' | 'StudentID';
+
 export type AuthTab = 'login' | 'signup' | 'admin';
 
 export type LinkType =
@@ -50,18 +54,75 @@ export interface UserProfile {
   buyCount: number;
   joinedLabel: string;
   role: UserRole;
+  staffRole?: StaffRole;
   payoutMethod: PaymentMethod;
   isDemo?: boolean;
+}
+
+export interface AdminVerificationBadges {
+  emailVerified: boolean;
+  mobileVerified: boolean;
+  idVerified: boolean;
 }
 
 export interface AdminAgent {
   uid: string;
   name: string;
   verified: boolean;
+  staffRole?: StaffRole;
+  email?: string;
+  phoneMasked?: string;
+  idType?: AdminIdType;
+  idLast4?: string;
+  appointedBy?: string;
+  inviteId?: string;
+  verificationBadges?: AdminVerificationBadges;
   specialty: string;
   reviewNotes: string;
   completedDeals: number;
   rating: number;
+}
+
+export interface TeamVerificationInvite {
+  id: string;
+  candidateEmail: string;
+  candidateName: string;
+  candidatePhone: string;
+  idType: AdminIdType;
+  idLast4: string;
+  staffRole: 'sub_admin' | 'moderator';
+  specialty: string;
+  verificationCode: string;
+  status: 'pending' | 'verified' | 'revoked';
+  createdBy: string;
+  claimedUid?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentGatewaySession {
+  id: string;
+  dealId: string;
+  buyerId: string;
+  method: PaymentMethod;
+  amount: number;
+  mode: 'live_api' | 'sandbox';
+  status: 'initiated' | 'authorized' | 'verified' | 'failed' | 'expired';
+  gatewayPaymentId: string;
+  trxId?: string;
+  senderMasked?: string;
+  redirectUrl?: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DateRangePreset = '7d' | '30d' | '90d' | 'all' | 'custom';
+
+export interface DateRangeFilter {
+  preset: DateRangePreset;
+  startDate: string;
+  endDate: string;
 }
 
 export interface PlatformEscrowConfig {

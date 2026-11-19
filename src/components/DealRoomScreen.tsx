@@ -16,6 +16,7 @@ import type {
   AdminDeal,
   DealServiceType,
   Language,
+  PaymentGatewaySession,
   PaymentMethod,
   PlatformEscrowConfig,
   UserProfile,
@@ -36,6 +37,8 @@ interface DealRoomScreenProps {
   language: Language;
   deal: AdminDeal;
   platformConfig?: PlatformEscrowConfig;
+  activePaymentSessions?: PaymentGatewaySession[];
+  onSavePaymentSession?: (session: PaymentGatewaySession) => void;
   onUpdateDeal: (updated: AdminDeal, firestorePatch?: Partial<AdminDeal>) => void;
   onVerifyPayment?: (dealId: string) => void;
   onReleasePayout?: (dealId: string) => void;
@@ -73,6 +76,8 @@ export function DealRoomScreen({
   language,
   deal,
   platformConfig,
+  activePaymentSessions = [],
+  onSavePaymentSession,
   onUpdateDeal,
   onVerifyPayment,
   onReleasePayout,
@@ -804,6 +809,8 @@ export function DealRoomScreen({
               platformConfig={platformConfig}
               initialProofNote={deal.paymentProofNote}
               initialProofUrl={deal.paymentProofUrl}
+              activeSessions={activePaymentSessions}
+              onSaveSession={onSavePaymentSession}
               onSubmitProof={({ method, proofNote: note, proofUrl: url }) => {
                 applyDirectPatch({
                   paymentProofNote: note,

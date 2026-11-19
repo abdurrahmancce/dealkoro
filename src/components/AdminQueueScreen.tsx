@@ -3,6 +3,7 @@ import { CheckCircle2, MessageCircle, ShieldCheck } from 'lucide-react';
 import type { AdminAgent, AdminDeal, Language } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { formatTk } from '../utils/dealMath';
+import { formatStaffRoleLabel } from '../utils/payloadSanitizer';
 
 interface AdminQueueScreenProps {
   language: Language;
@@ -55,9 +56,12 @@ export function AdminQueueScreen({
 
         <div className="flex items-center justify-between py-3 border-y border-slate-100 dark:border-slate-800">
           <div>
-            <div className="text-sm font-bold text-slate-900 dark:text-white">Admin</div>
+            <div className="text-sm font-bold text-slate-900 dark:text-white">
+              {formatStaffRoleLabel(selectedAdmin.staffRole)}
+            </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
               {selectedAdmin.completedDeals} deals · {selectedAdmin.rating.toFixed(1)} ★
+              {selectedAdmin.verificationBadges?.idVerified ? ` · ${selectedAdmin.idType || 'ID'} Verified` : ''}
             </div>
           </div>
           <button
@@ -118,7 +122,7 @@ export function AdminQueueScreen({
                     {admin.name}
                   </div>
                   <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    {admin.completedDeals} deals · {admin.specialty}
+                    {formatStaffRoleLabel(admin.staffRole)} · {admin.completedDeals} deals · {admin.specialty}
                   </div>
                 </div>
               </div>

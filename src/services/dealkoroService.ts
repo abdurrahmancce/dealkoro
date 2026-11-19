@@ -10,6 +10,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
@@ -24,15 +25,19 @@ import {
 import type {
   AdminAgent,
   AdminDeal,
+  AdminIdType,
   ChatMessage,
   Conversation,
   Language,
   Listing,
   ListingComment,
   NotificationItem,
+  PaymentGatewaySession,
   PaymentMethod,
   PlatformEscrowConfig,
+  StaffRole,
   StatementEntry,
+  TeamVerificationInvite,
   ThemeMode,
   UserProfile,
 } from '../types/dealkoro';
@@ -53,10 +58,16 @@ import {
   clampText,
   DEFAULT_PLATFORM_CONFIG,
   formatEscrowPaymentContact,
+  generateSmartVerificationCode,
+  isValidEmail,
+  maskBdPhone,
+  normalizeBdMobile,
   normalizeCategory,
   normalizeLinkType,
   normalizePaymentMethod,
+  normalizeStaffRole,
   sanitizeId,
+  sanitizeIdLast4,
   sanitizeImageUrl,
   sanitizePlatformConfig,
 } from '../utils/payloadSanitizer';
@@ -288,14 +299,18 @@ export async function resolveUserProfileFromFirebase(
   fbUser: FirebaseUser
 ): Promise<UserProfile> {
   const uid = sanitizeId(fbUser.uid);
-  const email = fbUser.email || '';
-  let isAdmin = email === BOOTSTRAP_ADMIN_EMAIL && fbUser.emailVerified;
+  const email = (fbUser.email || '').trim().toLowerCase();
+  const isMainAdmin = email === BOOTSTRAP_ADMIN_EMAIL && fbUser.emailVerified;
+  let isAdmin = isMainAdmin;
+  let staffRole: StaffRole | undefined = isMainAdmin ? 'main_admin' : undefined;
 
-  if (!isAdmin) {
+  if (!isMainAdmin) {
     try {
       const adminSnap = await getDoc(doc(db, 'admins', uid));
       if (adminSnap.exists()) {
+        const data = adminSnap.data();
         isAdmin = true;
+        staffRole = normalizeStaffRole(String(data.staffRole ?? 'sub_admin'), email);
       }
     } catch {
       // Non-admins stay user role
@@ -353,6 +368,7 @@ export async function resolveUserProfileFromFirebase(
     buyCount,
     joinedLabel,
     role: isAdmin ? 'admin' : 'user',
+    ...(staffRole ? { staffRole } : {}),
     payoutMethod,
     isDemo: false,
   };
@@ -395,8 +411,56 @@ export async function syncFirebaseUserProfile(user: UserProfile): Promise<void> 
   }
 }
 
+function buildAdminAgentDocPayload(agent: AdminAgent): Record<string, unknown> {
+  const uid = sanitizeId(agent.uid);
+  const payload: Record<string, unknown> = {
+    uid,
+    name: clampText(agent.name, BLUEPRINT_LIMITS.NAME_MAX, 'Verified Admin'),
+    verified: Boolean(agent.verified),
+    specialty: clampText(agent.specialty, 160, 'Escrow Mediator'),
+    reviewNotes: clampText(agent.reviewNotes, 500, 'Verified DEALKORO escrow mediator.'),
+    completedDeals: Math.max(0, Math.round(agent.completedDeals)),
+    rating: Math.max(0, Math.min(5, agent.rating || 5)),
+  };
+  if (agent.staffRole) {
+    payload.staffRole = normalizeStaffRole(agent.staffRole, agent.email);
+  }
+  if (agent.email) {
+    payload.email = clampText(agent.email.toLowerCase(), 160);
+  }
+  if (agent.phoneMasked) {
+    payload.phoneMasked = clampText(agent.phoneMasked, 32);
+  }
+  if (agent.idType) {
+    payload.idType = agent.idType;
+  }
+  if (agent.idLast4) {
+    payload.idLast4 = clampText(agent.idLast4, 8);
+  }
+  if (agent.appointedBy) {
+    payload.appointedBy = sanitizeId(agent.appointedBy);
+  }
+  if (agent.inviteId) {
+    payload.inviteId = sanitizeId(agent.inviteId);
+  }
+  if (agent.verificationBadges) {
+    payload.verificationBadges = {
+      emailVerified: Boolean(agent.verificationBadges.emailVerified),
+      mobileVerified: Boolean(agent.verificationBadges.mobileVerified),
+      idVerified: Boolean(agent.verificationBadges.idVerified),
+    };
+  }
+  return payload;
+}
+
 export async function ensureVerifiedAdminsInFirestore(user: UserProfile): Promise<void> {
-  if (!auth.currentUser || user.role !== 'admin') return;
+  if (
+    !auth.currentUser ||
+    user.email.trim().toLowerCase() !== BOOTSTRAP_ADMIN_EMAIL ||
+    !auth.currentUser.emailVerified
+  ) {
+    return;
+  }
   try {
     const existingSnap = await getDocs(collection(db, 'admins'));
     if (!existingSnap.empty) {
@@ -409,19 +473,9 @@ export async function ensureVerifiedAdminsInFirestore(user: UserProfile): Promis
   for (const agent of SEED_ADMINS) {
     const path = `admins/${agent.uid}`;
     try {
-      await setDoc(
-        doc(db, 'admins', agent.uid),
-        {
-          uid: agent.uid,
-          name: clampText(agent.name, BLUEPRINT_LIMITS.NAME_MAX),
-          verified: true,
-          specialty: clampText(agent.specialty, 160),
-          reviewNotes: clampText(agent.reviewNotes, 500),
-          completedDeals: agent.completedDeals,
-          rating: agent.rating,
-        },
-        { merge: true }
-      );
+      await setDoc(doc(db, 'admins', agent.uid), buildAdminAgentDocPayload(agent), {
+        merge: true,
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
@@ -431,22 +485,55 @@ export async function ensureVerifiedAdminsInFirestore(user: UserProfile): Promis
 export function subscribeFirebaseAdmins(
   onUpdate: (items: AdminAgent[]) => void
 ): Unsubscribe {
+  const rankRole = (role?: StaffRole): number => {
+    if (role === 'main_admin') return 0;
+    if (role === 'sub_admin') return 1;
+    return 2;
+  };
   return onSnapshot(
     collection(db, 'admins'),
     (snapshot) => {
       if (snapshot.empty) return;
-      const items: AdminAgent[] = snapshot.docs.map((d) => {
-        const data = d.data();
-        return {
-          uid: d.id,
-          name: String(data.name ?? 'Admin'),
-          verified: Boolean(data.verified ?? true),
-          specialty: String(data.specialty ?? 'Verified Escrow Mediator'),
-          reviewNotes: String(data.reviewNotes ?? ''),
-          completedDeals: Number(data.completedDeals ?? 0),
-          rating: Number(data.rating ?? 5),
-        };
-      });
+      const items: AdminAgent[] = snapshot.docs
+        .map((d) => {
+          const data = d.data();
+          const email = data.email ? String(data.email) : undefined;
+          const badgesRaw =
+            typeof data.verificationBadges === 'object' && data.verificationBadges !== null
+              ? (data.verificationBadges as Record<string, unknown>)
+              : null;
+          return {
+            uid: d.id,
+            name: String(data.name ?? 'Admin'),
+            verified: Boolean(data.verified ?? true),
+            staffRole: normalizeStaffRole(
+              data.staffRole ? String(data.staffRole) : d.id === 'admin_abdur' ? 'main_admin' : 'sub_admin',
+              email
+            ),
+            email,
+            phoneMasked: data.phoneMasked ? String(data.phoneMasked) : undefined,
+            idType: (data.idType as AdminIdType | undefined) || undefined,
+            idLast4: data.idLast4 ? String(data.idLast4) : undefined,
+            appointedBy: data.appointedBy ? String(data.appointedBy) : undefined,
+            inviteId: data.inviteId ? String(data.inviteId) : undefined,
+            verificationBadges: badgesRaw
+              ? {
+                  emailVerified: Boolean(badgesRaw.emailVerified),
+                  mobileVerified: Boolean(badgesRaw.mobileVerified),
+                  idVerified: Boolean(badgesRaw.idVerified),
+                }
+              : undefined,
+            specialty: String(data.specialty ?? 'Verified Escrow Mediator'),
+            reviewNotes: String(data.reviewNotes ?? ''),
+            completedDeals: Number(data.completedDeals ?? 0),
+            rating: Number(data.rating ?? 5),
+          };
+        })
+        .sort((a, b) => {
+          const rDiff = rankRole(a.staffRole) - rankRole(b.staffRole);
+          if (rDiff !== 0) return rDiff;
+          return b.completedDeals - a.completedDeals;
+        });
       onUpdate(items);
     },
     (error) => {
@@ -460,19 +547,7 @@ export async function persistAdminAgentToFirestore(agent: AdminAgent): Promise<v
   const uid = sanitizeId(agent.uid);
   const path = `admins/${uid}`;
   try {
-    await setDoc(
-      doc(db, 'admins', uid),
-      {
-        uid,
-        name: clampText(agent.name, BLUEPRINT_LIMITS.NAME_MAX, 'Verified Admin'),
-        verified: Boolean(agent.verified),
-        specialty: clampText(agent.specialty, 160, 'Escrow Mediator'),
-        reviewNotes: clampText(agent.reviewNotes, 500, 'Verified DEALKORO escrow mediator.'),
-        completedDeals: Math.max(0, Math.round(agent.completedDeals)),
-        rating: Math.max(0, Math.min(5, agent.rating || 5)),
-      },
-      { merge: true }
-    );
+    await setDoc(doc(db, 'admins', uid), buildAdminAgentDocPayload(agent), { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -487,6 +562,351 @@ export async function deleteAdminAgentFromFirestore(adminUid: string): Promise<v
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
+}
+
+export async function createTeamInviteInFirestore(params: {
+  createdByUid: string;
+  candidateName: string;
+  candidateEmail: string;
+  candidatePhone: string;
+  idType: AdminIdType;
+  idNumber: string;
+  staffRole: 'sub_admin' | 'moderator';
+  specialty: string;
+}): Promise<TeamVerificationInvite> {
+  const email = params.candidateEmail.trim().toLowerCase();
+  if (!isValidEmail(email)) {
+    throw new Error('Enter a valid candidate Google email address.');
+  }
+  if (email === BOOTSTRAP_ADMIN_EMAIL) {
+    throw new Error('Main Project Admin email cannot be invited as Sub-Admin.');
+  }
+  const normalizedPhone = normalizeBdMobile(params.candidatePhone);
+  if (!/^01[3-9]\d{8}$/.test(normalizedPhone)) {
+    throw new Error('Enter a valid 11-digit BD mobile number (01XXXXXXXXX).');
+  }
+  const idLast4 = sanitizeIdLast4(params.idNumber);
+  if (idLast4.length < 4) {
+    throw new Error('Enter at least the last 4 characters/digits of candidate NID or ID.');
+  }
+  const candidateName = clampText(params.candidateName, BLUEPRINT_LIMITS.NAME_MAX);
+  if (!candidateName) {
+    throw new Error('Enter the candidate full name.');
+  }
+
+  const id = sanitizeId(
+    `inv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  );
+  const verificationCode = generateSmartVerificationCode();
+  const specialty = clampText(
+    params.specialty || 'Verified Escrow Mediator',
+    160,
+    'Verified Escrow Mediator'
+  );
+  const nowIso = new Date().toISOString();
+
+  const invite: TeamVerificationInvite = {
+    id,
+    candidateEmail: email,
+    candidateName,
+    candidatePhone: normalizedPhone,
+    idType: params.idType,
+    idLast4,
+    staffRole: params.staffRole === 'moderator' ? 'moderator' : 'sub_admin',
+    specialty,
+    verificationCode,
+    status: 'pending',
+    createdBy: sanitizeId(params.createdByUid),
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  if (auth.currentUser) {
+    const path = `teamInvites/${id}`;
+    try {
+      await setDoc(doc(db, 'teamInvites', id), {
+        id: invite.id,
+        candidateEmail: invite.candidateEmail,
+        candidateName: invite.candidateName,
+        candidatePhone: invite.candidatePhone,
+        idType: invite.idType,
+        idLast4: invite.idLast4,
+        staffRole: invite.staffRole,
+        specialty: invite.specialty,
+        verificationCode: invite.verificationCode,
+        status: 'pending',
+        createdBy: invite.createdBy,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  }
+
+  return invite;
+}
+
+export async function revokeTeamInviteInFirestore(inviteId: string): Promise<void> {
+  if (!auth.currentUser) return;
+  const id = sanitizeId(inviteId);
+  const path = `teamInvites/${id}`;
+  try {
+    await updateDoc(doc(db, 'teamInvites', id), {
+      status: 'revoked',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export function subscribeTeamInvites(
+  email: string,
+  isMainAdmin: boolean,
+  onUpdate: (invites: TeamVerificationInvite[]) => void
+): Unsubscribe {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!isMainAdmin && !normalizedEmail) {
+    return () => {};
+  }
+
+  const q = isMainAdmin
+    ? collection(db, 'teamInvites')
+    : query(collection(db, 'teamInvites'), where('candidateEmail', '==', normalizedEmail));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const items: TeamVerificationInvite[] = snapshot.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            candidateEmail: String(data.candidateEmail ?? ''),
+            candidateName: String(data.candidateName ?? ''),
+            candidatePhone: String(data.candidatePhone ?? ''),
+            idType: (data.idType as AdminIdType) || 'NID',
+            idLast4: String(data.idLast4 ?? ''),
+            staffRole: (data.staffRole === 'moderator' ? 'moderator' : 'sub_admin') as
+              | 'sub_admin'
+              | 'moderator',
+            specialty: String(data.specialty ?? 'Escrow Mediator'),
+            verificationCode: String(data.verificationCode ?? ''),
+            status: (data.status as TeamVerificationInvite['status']) || 'pending',
+            createdBy: String(data.createdBy ?? ''),
+            claimedUid: data.claimedUid ? String(data.claimedUid) : undefined,
+            createdAt: toIsoString(data.createdAt),
+            updatedAt: toIsoString(data.updatedAt),
+          };
+        })
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      onUpdate(items);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'teamInvites');
+    }
+  );
+}
+
+export async function claimTeamInviteAndActivateAdmin(params: {
+  invite: TeamVerificationInvite;
+  fbUser: FirebaseUser;
+  enteredPhone: string;
+  enteredIdLast4: string;
+  enteredCode: string;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  agent?: AdminAgent;
+  staffRole?: 'sub_admin' | 'moderator';
+}> {
+  const userEmail = (params.fbUser.email || '').trim().toLowerCase();
+  if (!params.fbUser.emailVerified || userEmail !== params.invite.candidateEmail.toLowerCase()) {
+    return {
+      ok: false,
+      error: 'Signed-in Google email does not match this verified invitation.',
+    };
+  }
+  if (params.invite.status !== 'pending') {
+    return {
+      ok: false,
+      error: 'This invitation has already been claimed or revoked.',
+    };
+  }
+
+  const normalizedPhone = normalizeBdMobile(params.enteredPhone);
+  if (normalizedPhone !== normalizeBdMobile(params.invite.candidatePhone)) {
+    return {
+      ok: false,
+      error: 'Mobile number does not match the number registered by Main Admin.',
+    };
+  }
+
+  const enteredLast4 = sanitizeIdLast4(params.enteredIdLast4);
+  if (enteredLast4 !== sanitizeIdLast4(params.invite.idLast4)) {
+    return {
+      ok: false,
+      error: `${params.invite.idType} last 4 digits do not match.`,
+    };
+  }
+
+  if (params.enteredCode.trim() !== params.invite.verificationCode.trim()) {
+    return {
+      ok: false,
+      error: 'Invalid 6-digit smart verification code.',
+    };
+  }
+
+  const uid = sanitizeId(params.fbUser.uid);
+  const roleLabel = params.invite.staffRole === 'moderator' ? 'Moderator' : 'Sub-Admin';
+  const agent: AdminAgent = {
+    uid,
+    name: clampText(params.invite.candidateName, BLUEPRINT_LIMITS.NAME_MAX, 'Staff Admin'),
+    verified: true,
+    staffRole: params.invite.staffRole,
+    email: userEmail,
+    phoneMasked: maskBdPhone(normalizedPhone),
+    idType: params.invite.idType,
+    idLast4: enteredLast4,
+    appointedBy: sanitizeId(params.invite.createdBy),
+    inviteId: sanitizeId(params.invite.id),
+    verificationBadges: {
+      emailVerified: true,
+      mobileVerified: true,
+      idVerified: true,
+    },
+    specialty: clampText(params.invite.specialty, 160, 'Verified Escrow Mediator'),
+    reviewNotes: `Smart-verified ${roleLabel} (Email, Mobile & ${params.invite.idType} confirmed).`,
+    completedDeals: 0,
+    rating: 5.0,
+  };
+
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'teamInvites', params.invite.id), {
+      status: 'verified',
+      claimedUid: uid,
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'admins', uid), buildAdminAgentDocPayload(agent));
+    await batch.commit();
+
+    await setDoc(
+      doc(db, 'users', uid),
+      { role: 'admin', updatedAt: serverTimestamp() },
+      { merge: true }
+    ).catch(() => {});
+
+    return { ok: true, agent, staffRole: params.invite.staffRole };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `teamInvites/${params.invite.id}`);
+    return {
+      ok: false,
+      error: 'Could not activate staff role in Firestore. Please try again.',
+    };
+  }
+}
+
+export async function persistPaymentSessionToFirestore(
+  session: PaymentGatewaySession
+): Promise<void> {
+  if (!auth.currentUser) return;
+  const id = sanitizeId(session.id);
+  const path = `paymentSessions/${id}`;
+  const payload: Record<string, unknown> = {
+    id,
+    dealId: sanitizeId(session.dealId),
+    buyerId: sanitizeId(session.buyerId),
+    method: normalizePaymentMethod(session.method),
+    amount: Math.max(1, clampPrice(session.amount)),
+    mode: session.mode === 'live_api' ? 'live_api' : 'sandbox',
+    status: session.status,
+    gatewayPaymentId: clampText(session.gatewayPaymentId, 128, id),
+    expiresAt: session.expiresAt,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  if (session.trxId) payload.trxId = clampText(session.trxId, 32);
+  if (session.senderMasked) payload.senderMasked = clampText(session.senderMasked, 32);
+  if (session.redirectUrl) payload.redirectUrl = clampText(session.redirectUrl, 512);
+
+  try {
+    await setDoc(doc(db, 'paymentSessions', id), payload, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function updatePaymentSessionInFirestore(
+  sessionId: string,
+  patch: Partial<Pick<PaymentGatewaySession, 'status' | 'trxId' | 'senderMasked'>>
+): Promise<void> {
+  if (!auth.currentUser) return;
+  const id = sanitizeId(sessionId);
+  const path = `paymentSessions/${id}`;
+  const payload: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+  if (patch.status !== undefined) payload.status = patch.status;
+  if (patch.trxId !== undefined) payload.trxId = clampText(patch.trxId, 32);
+  if (patch.senderMasked !== undefined) payload.senderMasked = clampText(patch.senderMasked, 32);
+  try {
+    await updateDoc(doc(db, 'paymentSessions', id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export function subscribeDealPaymentSessions(
+  dealId: string,
+  buyerId: string,
+  isMainAdmin: boolean,
+  onUpdate: (sessions: PaymentGatewaySession[]) => void
+): Unsubscribe {
+  const currentUid = auth.currentUser?.uid;
+  if (!currentUid || (!isMainAdmin && currentUid !== buyerId)) {
+    return () => {};
+  }
+  const cleanDealId = sanitizeId(dealId);
+  const q = isMainAdmin
+    ? query(collection(db, 'paymentSessions'), where('dealId', '==', cleanDealId))
+    : query(
+        collection(db, 'paymentSessions'),
+        where('dealId', '==', cleanDealId),
+        where('buyerId', '==', currentUid)
+      );
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list: PaymentGatewaySession[] = snap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            dealId: String(data.dealId ?? cleanDealId),
+            buyerId: String(data.buyerId ?? ''),
+            method: normalizePaymentMethod(String(data.method ?? 'bKash')),
+            amount: Number(data.amount ?? 0),
+            mode: (data.mode === 'live_api' ? 'live_api' : 'sandbox') as 'live_api' | 'sandbox',
+            status: (data.status as PaymentGatewaySession['status']) || 'initiated',
+            gatewayPaymentId: String(data.gatewayPaymentId ?? ''),
+            trxId: data.trxId ? String(data.trxId) : undefined,
+            senderMasked: data.senderMasked ? String(data.senderMasked) : undefined,
+            redirectUrl: data.redirectUrl ? String(data.redirectUrl) : undefined,
+            expiresAt: String(data.expiresAt ?? ''),
+            createdAt: toIsoString(data.createdAt),
+            updatedAt: toIsoString(data.updatedAt),
+          };
+        })
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      onUpdate(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'paymentSessions');
+    }
+  );
 }
 
 export function subscribePlatformEscrowConfig(

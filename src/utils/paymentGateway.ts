@@ -1,5 +1,5 @@
-import type { PaymentMethod } from '../types/dealkoro';
-import { BLUEPRINT_LIMITS, clampText } from './payloadSanitizer';
+import type { PaymentGatewaySession, PaymentMethod } from '../types/dealkoro';
+import { BLUEPRINT_LIMITS, clampPrice, clampText, maskBdPhone, sanitizeId } from './payloadSanitizer';
 
 export type WalletAccountType = 'Personal' | 'Merchant' | 'Agent';
 
@@ -48,12 +48,16 @@ export function buildOnlinePaymentProofNote(params: {
   trxId: string;
   amount: number;
   dealId: string;
-  mode: 'online_checkout' | 'merchant_link';
+  mode: 'online_checkout' | 'merchant_link' | 'live_api' | 'sandbox';
 }): string {
   const wallet = validateBdWalletNumber(params.senderNumber);
   const trx = validateTrxId(params.trxId);
   const tag =
-    params.mode === 'merchant_link'
+    params.mode === 'live_api'
+      ? `${params.method} Live Gateway`
+      : params.mode === 'sandbox'
+      ? `${params.method} Sandbox Gateway`
+      : params.mode === 'merchant_link'
       ? `${params.method} Online Gateway`
       : `${params.method} Real-Time Checkout`;
   const parts = [
@@ -64,6 +68,111 @@ export function buildOnlinePaymentProofNote(params: {
     `Deal: ${params.dealId.slice(-10)}`,
   ].filter(Boolean);
   return clampText(parts.join(' · '), BLUEPRINT_LIMITS.PROOF_NOTE_MAX);
+}
+
+export function createSandboxSessionPayload(params: {
+  dealId: string;
+  buyerId: string;
+  method: PaymentMethod;
+  amount: number;
+  now?: Date;
+}): PaymentGatewaySession {
+  const now = params.now ?? new Date();
+  const stamp = now.getTime().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const id = sanitizeId(`ps_${stamp}_${rand}`);
+  const prefix = params.method === 'bKash' ? 'BKPGW' : 'NGPGW';
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+  const nowIso = now.toISOString();
+
+  return {
+    id,
+    dealId: sanitizeId(params.dealId),
+    buyerId: sanitizeId(params.buyerId),
+    method: params.method === 'Nagad' ? 'Nagad' : 'bKash',
+    amount: clampPrice(params.amount),
+    mode: 'sandbox',
+    status: 'initiated',
+    gatewayPaymentId: `${prefix}_${stamp}_${rand}`,
+    expiresAt,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+export function verifySandboxPaymentPayload(params: {
+  session: PaymentGatewaySession;
+  walletNumber: string;
+  otp: string;
+  pin?: string;
+}): {
+  ok: boolean;
+  session?: PaymentGatewaySession;
+  trxId?: string;
+  error?: string;
+} {
+  const wallet = validateBdWalletNumber(params.walletNumber);
+  if (!wallet.valid) {
+    return {
+      ok: false,
+      error: 'Enter a valid 11-digit Bangladesh bKash/Nagad wallet number (01XXXXXXXXX).',
+    };
+  }
+  const cleanOtp = params.otp.replace(/[^\d]/g, '');
+  if (cleanOtp !== '123456') {
+    return {
+      ok: false,
+      error: 'Invalid verification OTP. Enter sandbox OTP 123456.',
+    };
+  }
+  const cleanPin = (params.pin ?? '1234').replace(/[^\d]/g, '');
+  if (cleanPin.length < 4 || cleanPin.length > 5) {
+    return {
+      ok: false,
+      error: 'Enter a 4 or 5-digit wallet PIN to authorize sandbox payment.',
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+  const prefix = params.session.method === 'bKash' ? 'BK' : 'NG';
+  const trxId = `${prefix}${Date.now().toString(36).toUpperCase().slice(-6)}${wallet.normalized.slice(-2)}`;
+  const senderMasked = maskBdPhone(wallet.normalized);
+
+  return {
+    ok: true,
+    trxId,
+    session: {
+      ...params.session,
+      status: 'verified',
+      trxId,
+      senderMasked,
+      updatedAt: nowIso,
+    },
+  };
+}
+
+export function formatGatewaySessionSummary(session: PaymentGatewaySession): string {
+  const modeLabel = session.mode === 'live_api' ? 'Live Merchant API' : 'Sandbox Gateway';
+  const trxPart = session.trxId ? ` · TrxID ${session.trxId}` : '';
+  return `${session.method} ${modeLabel} (${session.status})${trxPart}`;
+}
+
+export function parseGatewayCallbackParams(search: string): {
+  paymentID?: string;
+  status?: string;
+  paymentRefId?: string;
+  method?: PaymentMethod;
+} | null {
+  if (!search) return null;
+  const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  const paymentID = params.get('paymentID') || params.get('payment_id') || undefined;
+  const paymentRefId = params.get('payment_ref_id') || undefined;
+  const status = params.get('status') || undefined;
+  const gwMethod = params.get('gateway');
+  if (!paymentID && !paymentRefId) return null;
+  const method: PaymentMethod | undefined =
+    gwMethod === 'Nagad' || paymentRefId ? 'Nagad' : gwMethod === 'bKash' || paymentID ? 'bKash' : undefined;
+  return { paymentID, paymentRefId, status, method };
 }
 
 /**

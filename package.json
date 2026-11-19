@@ -4,10 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "node server.ts --dev",
     "build": "vite build",
     "preview": "vite preview --port=3000 --host=0.0.0.0",
-    "start": "vite preview --port=3000 --host=0.0.0.0",
+    "start": "node server.ts",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/utils/dealMath.test.ts src/utils/adminMetrics.test.ts src/utils/payloadSanitizer.test.ts src/utils/priceTrends.test.ts src/utils/paymentGateway.test.ts"
   },

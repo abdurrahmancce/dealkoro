@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import {
   buildOnlinePaymentProofNote,
   buildQrMatrix,
+  createSandboxSessionPayload,
+  formatGatewaySessionSummary,
+  parseGatewayCallbackParams,
   sanitizeMerchantPaymentLink,
   validateBdWalletNumber,
   validateTrxId,
-} from './paymentGateway';
+  verifySandboxPaymentPayload,
+} from './paymentGateway.ts';
 
 test('validateBdWalletNumber normalizes +880 and validates Bangladesh mobile numbers', () => {
   assert.deepEqual(validateBdWalletNumber('+880 1755-842190'), {
@@ -63,4 +67,48 @@ test('buildQrMatrix generates a deterministic 21x21 boolean grid', () => {
   // Finder top-left corner should be filled
   assert.equal(m1[0][0], true);
   assert.equal(m1[3][3], true);
+});
+
+test('createSandboxSessionPayload & verifySandboxPaymentPayload handle real-time OTP/PIN verification', () => {
+  const session = createSandboxSessionPayload({
+    dealId: 'deal_2000_active',
+    buyerId: 'user_salim',
+    method: 'Nagad',
+    amount: 2110,
+  });
+  assert.equal(session.method, 'Nagad');
+  assert.equal(session.mode, 'sandbox');
+  assert.equal(session.status, 'initiated');
+  assert.ok(session.gatewayPaymentId.startsWith('NGPGW_'));
+
+  const badOtp = verifySandboxPaymentPayload({
+    session,
+    walletNumber: '01819445566',
+    otp: '000000',
+    pin: '1234',
+  });
+  assert.equal(badOtp.ok, false);
+
+  const okRes = verifySandboxPaymentPayload({
+    session,
+    walletNumber: '+8801819445566',
+    otp: '123456',
+    pin: '4321',
+  });
+  assert.equal(okRes.ok, true);
+  assert.equal(okRes.session?.status, 'verified');
+  assert.ok(okRes.trxId?.startsWith('NG'));
+  assert.equal(okRes.session?.senderMasked, '018****5566');
+  assert.ok(formatGatewaySessionSummary(okRes.session!).includes('Nagad Sandbox Gateway'));
+});
+
+test('parseGatewayCallbackParams extracts bKash and Nagad callback tokens', () => {
+  const bkashCb = parseGatewayCallbackParams('?paymentID=TR00112233&status=success&gateway=bKash');
+  assert.deepEqual(bkashCb, {
+    paymentID: 'TR00112233',
+    paymentRefId: undefined,
+    status: 'success',
+    method: 'bKash',
+  });
+  assert.equal(parseGatewayCallbackParams('?foo=bar'), null);
 });

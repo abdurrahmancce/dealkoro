@@ -33,18 +33,83 @@
     },
     "AdminAgent": {
       "title": "AdminAgent",
-      "description": "Verified DEALKORO escrow mediator profile.",
+      "description": "Verified DEALKORO escrow mediator profile with hierarchical role and smart verification metadata.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "name": { "type": "string", "minLength": 1, "maxLength": 80 },
         "verified": { "type": "boolean" },
+        "staffRole": { "type": "string", "enum": ["main_admin", "sub_admin", "moderator"] },
+        "email": { "type": "string", "maxLength": 160 },
+        "phoneMasked": { "type": "string", "maxLength": 32 },
+        "idType": { "type": "string", "enum": ["NID", "Passport", "StudentID"] },
+        "idLast4": { "type": "string", "maxLength": 8 },
+        "appointedBy": { "type": "string", "maxLength": 128 },
+        "inviteId": { "type": "string", "maxLength": 128 },
+        "verificationBadges": { "type": "object", "description": "Boolean flags for emailVerified, mobileVerified, and idVerified." },
         "specialty": { "type": "string", "maxLength": 160 },
         "reviewNotes": { "type": "string", "maxLength": 500 },
         "completedDeals": { "type": "number" },
         "rating": { "type": "number" }
       },
       "required": ["uid", "name", "verified", "reviewNotes", "completedDeals", "rating"]
+    },
+    "TeamVerificationInvite": {
+      "title": "TeamVerificationInvite",
+      "description": "Main-admin-issued appointment invitation requiring smart Email, Mobile, ID, and 6-digit code confirmation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "candidateEmail": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "candidateName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "candidatePhone": { "type": "string", "minLength": 6, "maxLength": 32 },
+        "idType": { "type": "string", "enum": ["NID", "Passport", "StudentID"] },
+        "idLast4": { "type": "string", "minLength": 2, "maxLength": 8 },
+        "staffRole": { "type": "string", "enum": ["sub_admin", "moderator"] },
+        "specialty": { "type": "string", "maxLength": 160 },
+        "verificationCode": { "type": "string", "minLength": 6, "maxLength": 12 },
+        "status": { "type": "string", "enum": ["pending", "verified", "revoked"] },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "claimedUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "candidateEmail",
+        "candidateName",
+        "candidatePhone",
+        "idType",
+        "idLast4",
+        "staffRole",
+        "verificationCode",
+        "status",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PaymentGatewaySession": {
+      "title": "PaymentGatewaySession",
+      "description": "Real-time bKash or Nagad checkout session tracking live API or sandbox verification status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dealId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "buyerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "method": { "type": "string", "enum": ["bKash", "Nagad"] },
+        "amount": { "type": "number" },
+        "mode": { "type": "string", "enum": ["live_api", "sandbox"] },
+        "status": { "type": "string", "enum": ["initiated", "authorized", "verified", "failed", "expired"] },
+        "gatewayPaymentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "trxId": { "type": "string", "maxLength": 32 },
+        "senderMasked": { "type": "string", "maxLength": 32 },
+        "redirectUrl": { "type": "string", "maxLength": 512 },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "dealId", "buyerId", "method", "amount", "mode", "status", "gatewayPaymentId", "expiresAt", "createdAt", "updatedAt"]
     },
     "Listing": {
       "title": "Listing",
@@ -304,6 +369,14 @@
     "/platformConfig/{configId}": {
       "schema": { "$ref": "#/entities/PlatformEscrowConfig" },
       "description": "Admin-managed escrow payment contacts and launch notices."
+    },
+    "/teamInvites/{inviteId}": {
+      "schema": { "$ref": "#/entities/TeamVerificationInvite" },
+      "description": "Main-admin-issued Sub-Admin and Moderator smart verification invitations."
+    },
+    "/paymentSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/PaymentGatewaySession" },
+      "description": "Real-time bKash and Nagad gateway payment sessions linked to escrow deals."
     }
   }
 }

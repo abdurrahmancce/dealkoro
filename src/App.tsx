@@ -3,14 +3,17 @@ import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import type {
   AdminAgent,
   AdminDeal,
+  AdminIdType,
   AppRoute,
   ChatMessage,
   Conversation,
   Language,
   Listing,
   NotificationItem,
+  PaymentGatewaySession,
   PlatformEscrowConfig,
   StatementEntry,
+  TeamVerificationInvite,
   ThemeMode,
 } from './types/dealkoro';
 import {
@@ -22,7 +25,9 @@ import { ASSETS } from './data/seedData';
 import {
   BOOTSTRAP_ADMIN_EMAIL,
   buildNewDealFromConversation,
+  claimTeamInviteAndActivateAdmin,
   createDealInFirestore,
+  createTeamInviteInFirestore,
   deleteAdminAgentFromFirestore,
   deleteListingFromFirestore,
   ensureVerifiedAdminsInFirestore,
@@ -36,17 +41,21 @@ import {
   persistDealMessage,
   persistListingToFirestore,
   persistNotificationToFirestore,
+  persistPaymentSessionToFirestore,
   persistPlatformEscrowConfig,
   persistStatementToFirestore,
   resolveUserProfileFromFirebase,
+  revokeTeamInviteInFirestore,
   saveLocalPreferences,
   saveThemePreference,
   subscribeConversationMessages,
   subscribeDealMessages,
+  subscribeDealPaymentSessions,
   subscribeFirebaseAdmins,
   subscribeFirebaseListings,
   subscribeListingComments,
   subscribePlatformEscrowConfig,
+  subscribeTeamInvites,
   subscribeUserConversations,
   subscribeUserDeals,
   subscribeUserNotifications,
@@ -55,9 +64,11 @@ import {
   updateConversationInFirestore,
   updateDealInFirestore,
   updateListingStatusInFirestore,
+  updatePaymentSessionInFirestore,
   type DealkoroPersistedState,
 } from './services/dealkoroService';
 import { calculateDealBreakdown } from './utils/dealMath';
+import { parseGatewayCallbackParams } from './utils/paymentGateway';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell } from './components/AppShell';
 import { HomeFeedScreen } from './components/HomeFeedScreen';
@@ -71,6 +82,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { InboxScreen } from './components/InboxScreen';
 import { ChatScreen } from './components/ChatScreen';
 import { DealRoomScreen } from './components/DealRoomScreen';
+import { TeamVerificationBanner } from './components/TeamVerificationBanner';
 import { t } from './i18n/translations';
 
 export default function App() {
@@ -84,6 +96,8 @@ export default function App() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [teamInvites, setTeamInvites] = useState<TeamVerificationInvite[]>([]);
+  const [dealPaymentSessions, setDealPaymentSessions] = useState<PaymentGatewaySession[]>([]);
 
   const currentRoute = routeStack[routeStack.length - 1];
 
@@ -108,7 +122,18 @@ export default function App() {
       try {
         const profile = await resolveUserProfileFromFirebase(fbUser);
         setState((prev) => ({ ...prev, currentUser: profile }));
+        const urlDealId =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('dealId')
+            : null;
+        const gatewayCb =
+          typeof window !== 'undefined'
+            ? parseGatewayCallbackParams(window.location.search)
+            : null;
         setRouteStack((prev) => {
+          if (urlDealId && (gatewayCb || urlDealId.startsWith('deal_'))) {
+            return [{ screen: 'deal', dealId: urlDealId }];
+          }
           if (prev.length === 1 && prev[0].screen === 'home' && profile.role === 'admin') {
             return [{ screen: 'admin_dashboard' }];
           }
@@ -134,7 +159,8 @@ export default function App() {
   useEffect(() => {
     const activeUser = state.currentUser;
     if (!activeUser) return;
-    const isBootstrapAdmin = activeUser.email === BOOTSTRAP_ADMIN_EMAIL;
+    const isBootstrapAdmin =
+      activeUser.email.trim().toLowerCase() === BOOTSTRAP_ADMIN_EMAIL;
 
     const unsubAdmins = subscribeFirebaseAdmins((remoteAdmins) => {
       setState((prev) => ({ ...prev, admins: remoteAdmins }));
@@ -198,6 +224,14 @@ export default function App() {
       setState((prev) => ({ ...prev, platformConfig: remoteCfg }));
     });
 
+    const unsubInvites = subscribeTeamInvites(
+      activeUser.email,
+      isBootstrapAdmin,
+      (remoteInvites) => {
+        setTeamInvites(remoteInvites);
+      }
+    );
+
     return () => {
       unsubAdmins();
       unsubListings();
@@ -206,6 +240,7 @@ export default function App() {
       unsubNotifs();
       unsubStatements();
       unsubConfig();
+      unsubInvites();
     };
   }, [state.currentUser?.uid, state.currentUser?.email]);
 
@@ -242,7 +277,10 @@ export default function App() {
 
     if (currentRoute.screen === 'deal') {
       const dealId = currentRoute.dealId;
-      return subscribeDealMessages(dealId, (remoteMsgs) => {
+      const targetDeal = state.deals.find((d) => d.id === dealId);
+      const isBootstrapAdmin =
+        state.currentUser.email.trim().toLowerCase() === BOOTSTRAP_ADMIN_EMAIL;
+      const unsubMessages = subscribeDealMessages(dealId, (remoteMsgs) => {
         setState((prev) => ({
           ...prev,
           deals: prev.deals.map((d) =>
@@ -252,10 +290,23 @@ export default function App() {
           ),
         }));
       });
+      const unsubSessions = subscribeDealPaymentSessions(
+        dealId,
+        targetDeal?.buyerId || state.currentUser.uid,
+        isBootstrapAdmin,
+        (remoteSessions) => {
+          setDealPaymentSessions(remoteSessions);
+        }
+      );
+      return () => {
+        unsubMessages();
+        unsubSessions();
+        setDealPaymentSessions([]);
+      };
     }
 
     return undefined;
-  }, [state.currentUser?.uid, currentRoute]);
+  }, [state.currentUser?.uid, state.currentUser?.email, currentRoute]);
 
   const navigateTo = (next: AppRoute) => {
     setSyncNotice(null);
@@ -924,8 +975,14 @@ export default function App() {
     }).catch(() => {});
   };
 
+  const isMainProjectAdmin =
+    user.email.trim().toLowerCase() === BOOTSTRAP_ADMIN_EMAIL;
+
   const handleSavePlatformConfig = (config: PlatformEscrowConfig) => {
-    if (user.role !== 'admin') return;
+    if (!isMainProjectAdmin) {
+      reportSyncError('Only Main Project Admin (Abdur Rahman) can update escrow payment settings.');
+      return;
+    }
     setState((prev) => ({ ...prev, platformConfig: config }));
     void persistPlatformEscrowConfig(config).catch(() =>
       reportSyncError('Could not save escrow payment settings to Firestore.')
@@ -933,7 +990,10 @@ export default function App() {
   };
 
   const handleAddVerifiedAdmin = (agent: AdminAgent) => {
-    if (user.role !== 'admin') return;
+    if (!isMainProjectAdmin) {
+      reportSyncError('Only Main Project Admin can manage staff records directly.');
+      return;
+    }
     setState((prev) => ({
       ...prev,
       admins: [agent, ...prev.admins.filter((a) => a.uid !== agent.uid)],
@@ -944,7 +1004,7 @@ export default function App() {
   };
 
   const handleRemoveVerifiedAdmin = (adminUid: string) => {
-    if (user.role !== 'admin' || adminUid === user.uid || adminUid === 'admin_abdur') return;
+    if (!isMainProjectAdmin || adminUid === user.uid || adminUid === 'admin_abdur') return;
     setState((prev) => ({
       ...prev,
       admins: prev.admins.filter((a) => a.uid !== adminUid),
@@ -953,6 +1013,103 @@ export default function App() {
       reportSyncError('Could not remove verified moderator from Firestore.')
     );
   };
+
+  const handleCreateTeamInvite = async (params: {
+    candidateName: string;
+    candidateEmail: string;
+    candidatePhone: string;
+    idType: AdminIdType;
+    idNumber: string;
+    staffRole: 'sub_admin' | 'moderator';
+    specialty: string;
+  }): Promise<TeamVerificationInvite> => {
+    if (!isMainProjectAdmin) {
+      throw new Error('Only Main Project Admin can appoint Sub-Admins or Moderators.');
+    }
+    const created = await createTeamInviteInFirestore({
+      createdByUid: user.uid,
+      ...params,
+    });
+    setTeamInvites((prev) => [created, ...prev.filter((i) => i.id !== created.id)]);
+    return created;
+  };
+
+  const handleRevokeTeamInvite = async (inviteId: string) => {
+    if (!isMainProjectAdmin) return;
+    setTeamInvites((prev) =>
+      prev.map((inv) => (inv.id === inviteId ? { ...inv, status: 'revoked' } : inv))
+    );
+    await revokeTeamInviteInFirestore(inviteId).catch(() =>
+      reportSyncError('Could not revoke invitation in Firestore.')
+    );
+  };
+
+  const handleClaimTeamInvite = async (
+    invite: TeamVerificationInvite,
+    verification: { phone: string; idLast4: string; code: string }
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!auth.currentUser) {
+      return { ok: false, error: 'Sign in with Google first to complete smart verification.' };
+    }
+    const res = await claimTeamInviteAndActivateAdmin({
+      invite,
+      fbUser: auth.currentUser,
+      enteredPhone: verification.phone,
+      enteredIdLast4: verification.idLast4,
+      enteredCode: verification.code,
+    });
+    if (!res.ok || !res.agent) {
+      return { ok: false, error: res.error };
+    }
+    const activatedAgent = res.agent;
+    setTeamInvites((prev) =>
+      prev.map((inv) =>
+        inv.id === invite.id ? { ...inv, status: 'verified', claimedUid: user.uid } : inv
+      )
+    );
+    setState((prev) => ({
+      ...prev,
+      currentUser: prev.currentUser
+        ? {
+            ...prev.currentUser,
+            role: 'admin',
+            staffRole: res.staffRole ?? 'sub_admin',
+          }
+        : null,
+      admins: [
+        activatedAgent,
+        ...prev.admins.filter((a) => a.uid !== activatedAgent.uid),
+      ],
+    }));
+    return { ok: true };
+  };
+
+  const handleSavePaymentSession = (session: PaymentGatewaySession) => {
+    setDealPaymentSessions((prev) => {
+      const exists = prev.some((s) => s.id === session.id);
+      if (exists) {
+        return prev.map((s) => (s.id === session.id ? session : s));
+      }
+      return [session, ...prev];
+    });
+    if (session.status === 'initiated') {
+      void persistPaymentSessionToFirestore(session).catch(() => {});
+    } else {
+      void updatePaymentSessionInFirestore(session.id, {
+        status: session.status,
+        trxId: session.trxId,
+        senderMasked: session.senderMasked,
+      }).catch(() => {
+        void persistPaymentSessionToFirestore(session).catch(() => {});
+      });
+    }
+  };
+
+  const pendingInvitesForUser = teamInvites.filter(
+    (inv) =>
+      inv.status === 'pending' &&
+      inv.candidateEmail.trim().toLowerCase() === user.email.trim().toLowerCase()
+  );
 
   const unreadNotifications = state.notifications.filter(
     (n) => !n.isRead && (n.recipientId === user.uid || user.role === 'admin')
@@ -1004,6 +1161,14 @@ export default function App() {
             Dismiss
           </button>
         </div>
+      )}
+
+      {pendingInvitesForUser.length > 0 && (
+        <TeamVerificationBanner
+          language={state.language}
+          pendingInvites={pendingInvitesForUser}
+          onClaimInvite={handleClaimTeamInvite}
+        />
       )}
 
       {currentRoute.screen === 'home' && (
@@ -1142,6 +1307,7 @@ export default function App() {
           language={state.language}
           theme={theme}
           admins={state.admins}
+          teamInvites={teamInvites}
           deals={state.deals}
           listings={state.listings}
           statements={state.statements}
@@ -1154,6 +1320,8 @@ export default function App() {
           onSavePlatformConfig={handleSavePlatformConfig}
           onAddVerifiedAdmin={handleAddVerifiedAdmin}
           onRemoveVerifiedAdmin={handleRemoveVerifiedAdmin}
+          onCreateTeamInvite={handleCreateTeamInvite}
+          onRevokeTeamInvite={handleRevokeTeamInvite}
         />
       )}
 
@@ -1243,6 +1411,8 @@ export default function App() {
             language={state.language}
             deal={deal}
             platformConfig={state.platformConfig}
+            activePaymentSessions={dealPaymentSessions}
+            onSavePaymentSession={handleSavePaymentSession}
             onUpdateDeal={handleUpdateDeal}
             onVerifyPayment={handleVerifyPayment}
             onReleasePayout={handleReleasePayout}

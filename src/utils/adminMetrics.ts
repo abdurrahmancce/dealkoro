@@ -108,10 +108,109 @@ export function inferListingCategoryFromText(text: string): ListingCategory {
   return 'Other';
 }
 
+function toUtcDateKey(input: string | Date): string | null {
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function parseUtcDateKey(dateKey: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return null;
+  const parsed = new Date(`${dateKey}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (parsed.toISOString().slice(0, 10) !== dateKey) return null;
+  return parsed;
+}
+
+export function validateDateRange(
+  startDate: string,
+  endDate: string
+): { valid: boolean; error?: string; startDate: string; endDate: string } {
+  const start = parseUtcDateKey(startDate);
+  const end = parseUtcDateKey(endDate);
+  if (!start || !end) {
+    return {
+      valid: false,
+      error: 'Select valid Start and End dates.',
+      startDate,
+      endDate,
+    };
+  }
+  if (start.getTime() > end.getTime()) {
+    return {
+      valid: false,
+      error: 'Start date must be on or before End date.',
+      startDate,
+      endDate,
+    };
+  }
+  return { valid: true, startDate, endDate };
+}
+
+export function isIsoWithinDateRange(
+  iso: string | undefined,
+  startDate?: string,
+  endDate?: string
+): boolean {
+  if (!startDate && !endDate) return true;
+  if (!iso) return false;
+  const key = toUtcDateKey(iso);
+  if (!key) return false;
+  if (startDate && key < startDate) return false;
+  if (endDate && key > endDate) return false;
+  return true;
+}
+
+export function createDateRangePreset(
+  preset: '7d' | '30d' | '90d' | 'all' | 'custom',
+  statements: StatementEntry[],
+  deals: AdminDeal[],
+  referenceDate: Date = new Date()
+): { preset: '7d' | '30d' | '90d' | 'all' | 'custom'; startDate: string; endDate: string } {
+  const refUtc = new Date(
+    Date.UTC(
+      referenceDate.getUTCFullYear(),
+      referenceDate.getUTCMonth(),
+      referenceDate.getUTCDate()
+    )
+  );
+  const endDate = refUtc.toISOString().slice(0, 10);
+
+  if (preset === 'all') {
+    let earliest = endDate;
+    for (const s of statements) {
+      const k = toUtcDateKey(s.createdAt);
+      if (k && k < earliest) earliest = k;
+    }
+    for (const d of deals) {
+      const k = toUtcDateKey(d.updatedAt || d.createdAt);
+      if (k && k < earliest) earliest = k;
+    }
+    const thirtyAgo = new Date(refUtc.getTime() - 29 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    return {
+      preset: 'all',
+      startDate: earliest < thirtyAgo ? earliest : thirtyAgo,
+      endDate,
+    };
+  }
+
+  const days = preset === '7d' ? 7 : preset === '90d' ? 90 : 30;
+  const startUtc = new Date(refUtc.getTime() - (days - 1) * 86_400_000);
+  return {
+    preset,
+    startDate: startUtc.toISOString().slice(0, 10),
+    endDate,
+  };
+}
+
 export function computeCategoryFeeBreakdown(params: {
   deals: AdminDeal[];
   listings: Listing[];
   statements: StatementEntry[];
+  startDate?: string;
+  endDate?: string;
 }): CategoryFeeBreakdownItem[] {
   const listingCategoryMap = new Map<string, ListingCategory>();
   for (const listing of params.listings) {
@@ -154,6 +253,9 @@ export function computeCategoryFeeBreakdown(params: {
 
   for (const stmt of params.statements) {
     if (stmt.type !== 'admin_fee_income') continue;
+    if (!isIsoWithinDateRange(stmt.createdAt, params.startDate, params.endDate)) {
+      continue;
+    }
     const linkedDeal = dealMap.get(stmt.dealId);
     const category = resolveCategory(linkedDeal, stmt.title);
     const bucket = buckets.get(category)!;
@@ -165,6 +267,15 @@ export function computeCategoryFeeBreakdown(params: {
 
   for (const deal of params.deals) {
     if (deal.status === 'cancelled') continue;
+    if (
+      !isIsoWithinDateRange(
+        deal.updatedAt || deal.createdAt,
+        params.startDate,
+        params.endDate
+      )
+    ) {
+      continue;
+    }
     const category = resolveCategory(deal, deal.listingTitle);
     const bucket = buckets.get(category)!;
     bucket.dealIds.add(deal.id);
@@ -211,8 +322,9 @@ export function computeCategoryFeeBreakdown(params: {
   return rows;
 }
 
-export function compute30DayAdminFeeTrend(
+export function computeDailyAdminFeeTrend(
   statements: StatementEntry[],
+  range?: { startDate?: string; endDate?: string },
   referenceDate: Date = new Date()
 ): DailyRevenuePoint[] {
   const refUtc = new Date(
@@ -222,6 +334,23 @@ export function compute30DayAdminFeeTrend(
       referenceDate.getUTCDate()
     )
   );
+  const parsedEnd = range?.endDate ? parseUtcDateKey(range.endDate) : null;
+  const endUtc = parsedEnd ?? refUtc;
+  const parsedStart = range?.startDate ? parseUtcDateKey(range.startDate) : null;
+  const defaultStart = new Date(endUtc.getTime() - 29 * 86_400_000);
+  let startUtc = parsedStart ?? defaultStart;
+
+  if (startUtc.getTime() > endUtc.getTime()) {
+    startUtc = new Date(endUtc.getTime());
+  }
+
+  const maxSpanMs = 365 * 86_400_000;
+  if (endUtc.getTime() - startUtc.getTime() > maxSpanMs) {
+    startUtc = new Date(endUtc.getTime() - maxSpanMs);
+  }
+
+  const startKey = startUtc.toISOString().slice(0, 10);
+  const endKey = endUtc.toISOString().slice(0, 10);
 
   const dayTotals = new Map<
     string,
@@ -229,9 +358,8 @@ export function compute30DayAdminFeeTrend(
   >();
 
   for (const stmt of statements) {
-    const parsed = new Date(stmt.createdAt);
-    if (Number.isNaN(parsed.getTime())) continue;
-    const dateKey = parsed.toISOString().slice(0, 10);
+    const dateKey = toUtcDateKey(stmt.createdAt);
+    if (!dateKey || dateKey < startKey || dateKey > endKey) continue;
     const existing = dayTotals.get(dateKey) ?? {
       releasedFee: 0,
       dealVolume: 0,
@@ -247,8 +375,8 @@ export function compute30DayAdminFeeTrend(
   }
 
   const points: DailyRevenuePoint[] = [];
-  for (let offset = 29; offset >= 0; offset--) {
-    const d = new Date(refUtc.getTime() - offset * 86_400_000);
+  for (let ts = startUtc.getTime(); ts <= endUtc.getTime(); ts += 86_400_000) {
+    const d = new Date(ts);
     const dateKey = d.toISOString().slice(0, 10);
     const agg = dayTotals.get(dateKey);
     points.push({
@@ -264,6 +392,13 @@ export function compute30DayAdminFeeTrend(
     });
   }
   return points;
+}
+
+export function compute30DayAdminFeeTrend(
+  statements: StatementEntry[],
+  referenceDate: Date = new Date()
+): DailyRevenuePoint[] {
+  return computeDailyAdminFeeTrend(statements, undefined, referenceDate);
 }
 
 export function computeAdminDashboardMetrics(params: {

@@ -5,8 +5,11 @@ import {
   compute30DayAdminFeeTrend,
   computeAdminDashboardMetrics,
   computeCategoryFeeBreakdown,
+  computeDailyAdminFeeTrend,
+  createDateRangePreset,
   isActiveDeal,
   isPendingPayoutDeal,
+  validateDateRange,
 } from './adminMetrics.ts';
 import { SEED_DEALS, SEED_LISTINGS, SEED_NOTIFICATIONS, SEED_STATEMENTS } from '../data/seedData.ts';
 import type { AdminDeal, StatementEntry } from '../types/dealkoro.ts';
@@ -150,4 +153,66 @@ test('compute30DayAdminFeeTrend maps statement revenue into a 30-day UTC series'
   assert.equal(nov16?.releasedFee, 70);
   assert.equal(nov16?.dealVolume, 1400);
   assert.equal(nov16?.entryCount, 1);
+});
+
+test('createDateRangePreset and validateDateRange build and validate UTC date windows', () => {
+  const ref = new Date('2026-11-18T12:00:00Z');
+  const r7 = createDateRangePreset('7d', SEED_STATEMENTS, SEED_DEALS, ref);
+  assert.deepEqual(r7, {
+    preset: '7d',
+    startDate: '2026-11-12',
+    endDate: '2026-11-18',
+  });
+
+  const invalid = validateDateRange('2026-11-20', '2026-11-10');
+  assert.equal(invalid.valid, false);
+  assert.ok(invalid.error);
+
+  const valid = validateDateRange('2026-11-10', '2026-11-18');
+  assert.equal(valid.valid, true);
+});
+
+test('date range filters both computeCategoryFeeBreakdown and computeDailyAdminFeeTrend', () => {
+  const oldStmt: StatementEntry = {
+    id: 'stmt_old_oct',
+    userId: 'admin_abdur',
+    dealId: 'deal_old_1',
+    title: 'Escrow Fee Income: PUBG Old',
+    type: 'admin_fee_income',
+    amount: 90,
+    feeAmount: 0,
+    netAmount: 90,
+    method: 'Nagad',
+    createdAt: '2026-10-05T10:00:00Z',
+  };
+  const statements = [...SEED_STATEMENTS, oldStmt];
+
+  const novOnlyBreakdown = computeCategoryFeeBreakdown({
+    deals: SEED_DEALS,
+    listings: SEED_LISTINGS,
+    statements,
+    startDate: '2026-11-17',
+    endDate: '2026-11-18',
+  });
+  const totalNovReleased = novOnlyBreakdown.reduce((s, r) => s + r.releasedFee, 0);
+  const totalNovPending = novOnlyBreakdown.reduce((s, r) => s + r.pendingFee, 0);
+  assert.equal(totalNovReleased, 0); // stmt_3 is Nov 16
+  assert.equal(totalNovPending, 110); // deal_2000_active is Nov 18
+
+  const novTrend = computeDailyAdminFeeTrend(statements, {
+    startDate: '2026-11-15',
+    endDate: '2026-11-18',
+  });
+  assert.equal(novTrend.length, 4);
+  assert.equal(novTrend.find((p) => p.dateKey === '2026-11-16')?.releasedFee, 70);
+  assert.equal(novTrend.find((p) => p.dateKey === '2026-10-05'), undefined);
+
+  const futureEmpty = computeCategoryFeeBreakdown({
+    deals: SEED_DEALS,
+    listings: SEED_LISTINGS,
+    statements,
+    startDate: '2026-12-01',
+    endDate: '2026-12-10',
+  });
+  assert.equal(futureEmpty.reduce((s, r) => s + r.totalFee, 0), 0);
 });

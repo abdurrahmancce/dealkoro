@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  KeyRound,
   Lock,
   Search,
   Settings,
@@ -16,20 +17,24 @@ import {
   UserPlus,
   Users,
   Wallet,
+  XCircle,
 } from 'lucide-react';
 import type {
   AdminAgent,
   AdminDeal,
+  AdminIdType,
   AppRoute,
   Language,
   Listing,
   NotificationItem,
   PlatformEscrowConfig,
   StatementEntry,
+  TeamVerificationInvite,
   ThemeMode,
   UserProfile,
 } from '../types/dealkoro';
 import { t } from '../i18n/translations';
+import { BOOTSTRAP_ADMIN_EMAIL } from '../services/dealkoroService';
 import {
   buildRecentPlatformActivity,
   computeAdminDashboardMetrics,
@@ -37,7 +42,11 @@ import {
   isPendingPayoutDeal,
 } from '../utils/adminMetrics';
 import { calculateDealBreakdown, formatTk } from '../utils/dealMath';
-import { DEFAULT_PLATFORM_CONFIG, sanitizePlatformConfig } from '../utils/payloadSanitizer';
+import {
+  DEFAULT_PLATFORM_CONFIG,
+  formatStaffRoleLabel,
+  sanitizePlatformConfig,
+} from '../utils/payloadSanitizer';
 import { CategoryRevenueChart } from './CategoryRevenueChart';
 import { ResilientImage } from './ResilientImage';
 
@@ -48,6 +57,7 @@ interface AdminDashboardProps {
   language: Language;
   theme?: ThemeMode;
   admins: AdminAgent[];
+  teamInvites?: TeamVerificationInvite[];
   deals: AdminDeal[];
   listings: Listing[];
   statements: StatementEntry[];
@@ -60,6 +70,16 @@ interface AdminDashboardProps {
   onSavePlatformConfig?: (config: PlatformEscrowConfig) => void;
   onAddVerifiedAdmin?: (agent: AdminAgent) => void;
   onRemoveVerifiedAdmin?: (adminUid: string) => void;
+  onCreateTeamInvite?: (params: {
+    candidateName: string;
+    candidateEmail: string;
+    candidatePhone: string;
+    idType: AdminIdType;
+    idNumber: string;
+    staffRole: 'sub_admin' | 'moderator';
+    specialty: string;
+  }) => Promise<TeamVerificationInvite>;
+  onRevokeTeamInvite?: (inviteId: string) => Promise<void> | void;
 }
 
 function formatShortTime(iso: string): string {
@@ -78,6 +98,7 @@ export function AdminDashboard({
   language,
   theme = 'light',
   admins,
+  teamInvites = [],
   deals,
   listings,
   statements,
@@ -90,6 +111,8 @@ export function AdminDashboard({
   onSavePlatformConfig,
   onAddVerifiedAdmin,
   onRemoveVerifiedAdmin,
+  onCreateTeamInvite,
+  onRevokeTeamInvite,
 }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [searchQuery, setSearchQuery] = useState('');
@@ -107,11 +130,26 @@ export function AdminDashboard({
   const [noticeInput, setNoticeInput] = useState(platformConfig.announcement);
   const [configSaved, setConfigSaved] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [newAdminUid, setNewAdminUid] = useState('');
-  const [newAdminName, setNewAdminName] = useState('');
-  const [newAdminSpecialty, setNewAdminSpecialty] = useState('eFootball & Cross-Method Escrow');
-  const [adminAddedMsg, setAdminAddedMsg] = useState<string | null>(null);
+
+  // Smart Team Verification Appointment form states (Main Admin only)
+  const [inviteRole, setInviteRole] = useState<'sub_admin' | 'moderator'>('sub_admin');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [invitePhone, setInvitePhone] = useState('');
+  const [inviteIdType, setInviteIdType] = useState<AdminIdType>('NID');
+  const [inviteIdNumber, setInviteIdNumber] = useState('');
+  const [inviteSpecialty, setInviteSpecialty] = useState('bKash / Nagad Deal Verification');
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [issuedInvite, setIssuedInvite] = useState<TeamVerificationInvite | null>(null);
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
   const [copiedUid, setCopiedUid] = useState<string | null>(null);
+
+  const isMainAdmin =
+    user.email.trim().toLowerCase() === BOOTSTRAP_ADMIN_EMAIL ||
+    user.staffRole === 'main_admin';
+  const roleLabel = isMainAdmin
+    ? 'Main Project Admin'
+    : formatStaffRoleLabel(user.staffRole);
 
   useEffect(() => {
     setBkashInput(platformConfig.bkashNumber);
@@ -237,7 +275,9 @@ export function AdminDashboard({
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 text-xs font-semibold text-blue-700 dark:text-blue-400">
             <ShieldCheck className="w-4 h-4" />
-            <span>{user.displayName} · Admin</span>
+            <span>
+              {user.displayName} · {roleLabel}
+            </span>
           </div>
           <h1 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">
             {t(language, 'adminDashboard')}
@@ -681,326 +721,560 @@ export function AdminDashboard({
       {/* Section 4: Live Escrow Payment Settings & Admin Team */}
       {activeTab === 'settings' && (
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Left Card: Official Escrow Payment Numbers */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Official Escrow Payment Numbers
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Buyers see these verified bKash &amp; Nagad numbers inside every deal room. Changes sync across all devices immediately.
-            </p>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setConfigError(null);
-                setConfigSaved(false);
-                if (bkashInput.trim().length < 6 || nagadInput.trim().length < 6) {
-                  setConfigError('Please enter valid bKash and Nagad numbers (at least 6 digits).');
-                  return;
-                }
-                const nextCfg = sanitizePlatformConfig({
-                  bkashNumber: bkashInput,
-                  nagadNumber: nagadInput,
-                  bkashAccountType: bkashTypeInput,
-                  nagadAccountType: nagadTypeInput,
-                  bkashPaymentLink: bkashLinkInput,
-                  nagadPaymentLink: nagadLinkInput,
-                  escrowLabel: labelInput,
-                  announcement: noticeInput,
-                });
-                onSavePlatformConfig?.(nextCfg);
-                setConfigSaved(true);
-              }}
-              className="space-y-3"
-            >
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2.5">
-                <div>
-                  <label
-                    htmlFor="cfg-bkash"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    bKash Number
-                  </label>
-                  <input
-                    id="cfg-bkash"
-                    type="text"
-                    value={bkashInput}
-                    onChange={(e) => setBkashInput(e.target.value)}
-                    placeholder="e.g. 01755-842190"
-                    className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="cfg-bkash-type"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    bKash Type
-                  </label>
-                  <select
-                    id="cfg-bkash-type"
-                    value={bkashTypeInput}
-                    onChange={(e) =>
-                      setBkashTypeInput(e.target.value as 'Personal' | 'Merchant' | 'Agent')
-                    }
-                    className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  >
-                    <option value="Personal">Personal</option>
-                    <option value="Merchant">Merchant</option>
-                    <option value="Agent">Agent</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="cfg-bkash-link"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                >
-                  bKash Online Payment Link (Optional HTTPS)
-                </label>
-                <input
-                  id="cfg-bkash-link"
-                  type="url"
-                  value={bkashLinkInput}
-                  onChange={(e) => setBkashLinkInput(e.target.value)}
-                  placeholder="https://shop.bkash.com/..."
-                  className="w-full min-h-[40px] px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2.5">
-                <div>
-                  <label
-                    htmlFor="cfg-nagad"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Nagad Number
-                  </label>
-                  <input
-                    id="cfg-nagad"
-                    type="text"
-                    value={nagadInput}
-                    onChange={(e) => setNagadInput(e.target.value)}
-                    placeholder="e.g. 01819-000000"
-                    className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="cfg-nagad-type"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Nagad Type
-                  </label>
-                  <select
-                    id="cfg-nagad-type"
-                    value={nagadTypeInput}
-                    onChange={(e) =>
-                      setNagadTypeInput(e.target.value as 'Personal' | 'Merchant' | 'Agent')
-                    }
-                    className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  >
-                    <option value="Personal">Personal</option>
-                    <option value="Merchant">Merchant</option>
-                    <option value="Agent">Agent</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="cfg-nagad-link"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                >
-                  Nagad Online Payment Link (Optional HTTPS)
-                </label>
-                <input
-                  id="cfg-nagad-link"
-                  type="url"
-                  value={nagadLinkInput}
-                  onChange={(e) => setNagadLinkInput(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full min-h-[40px] px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="cfg-label"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                >
-                  Account Label (Personal / Merchant / Agent)
-                </label>
-                <input
-                  id="cfg-label"
-                  type="text"
-                  value={labelInput}
-                  onChange={(e) => setLabelInput(e.target.value)}
-                  placeholder="DEALKORO Official Escrow (Personal)"
-                  className="w-full min-h-[42px] px-3.5 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="cfg-notice"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                >
-                  Deal Room Payment Notice
-                </label>
-                <textarea
-                  id="cfg-notice"
-                  rows={2}
-                  value={noticeInput}
-                  onChange={(e) => setNoticeInput(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                />
-              </div>
-
-              {configError && (
-                <div
-                  role="alert"
-                  className="p-2.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-xl"
-                >
-                  {configError}
-                </div>
-              )}
-
-              {configSaved && (
-                <div className="p-2.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-xl">
-                  Official escrow payment numbers saved and synced live!
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="w-full min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors"
-              >
-                Save Escrow Numbers
-              </button>
-            </form>
-          </div>
-
-          <div className="space-y-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <UserPlus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <Settings className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                  Add Verified Admin Moderator
+                  Official Escrow Payment Numbers
                 </h2>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Only existing verified Admins can add moderators (locked in Firestore security rules).
-              </p>
+              {!isMainAdmin && (
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 inline-flex items-center gap-1">
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Main Admin Only</span>
+                </span>
+              )}
+            </div>
 
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1 text-xs text-slate-700 dark:text-slate-300">
-                <div className="font-bold text-slate-900 dark:text-white">
-                  How to add a moderator:
-                </div>
-                <div>1. Moderator signs in once with Google.</div>
-                <div>
-                  2. They open <span className="font-semibold">Profile</span> and tap{' '}
-                  <span className="font-semibold">Copy UID</span>.
-                </div>
-                <div>
-                  3. Paste their UID below &amp; click{' '}
-                  <span className="font-semibold">Add Verified Admin</span>.
+            {!isMainAdmin ? (
+              <div className="space-y-3 text-xs">
+                <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Escrow payment numbers are managed exclusively by Main Project Admin{' '}
+                  <span className="font-semibold text-slate-900 dark:text-white">Abdur Rahman</span>{' '}
+                  ({BOOTSTRAP_ADMIN_EMAIL}). As {roleLabel}, you have full access to verify buyer payments and release seller payouts.
+                </p>
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">bKash ({platformConfig.bkashAccountType || 'Personal'})</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">{platformConfig.bkashNumber}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Nagad ({platformConfig.nagadAccountType || 'Personal'})</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">{platformConfig.nagadNumber}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Escrow Label</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">{platformConfig.escrowLabel}</span>
+                  </div>
                 </div>
               </div>
+            ) : (
+              <>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Buyers see these verified bKash &amp; Nagad numbers inside every deal room. Changes sync across all devices immediately.
+                </p>
 
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setAdminAddedMsg(null);
-                  if (!newAdminUid.trim() || !newAdminName.trim()) return;
-                  onAddVerifiedAdmin?.({
-                    uid: newAdminUid.trim(),
-                    name: newAdminName.trim(),
-                    verified: true,
-                    specialty: newAdminSpecialty.trim() || 'Verified Escrow Mediator',
-                    reviewNotes: 'Added as verified DEALKORO escrow mediator.',
-                    completedDeals: 0,
-                    rating: 5.0,
-                  });
-                  setAdminAddedMsg(`Added ${newAdminName.trim()} to verified admins.`);
-                  setNewAdminUid('');
-                  setNewAdminName('');
-                }}
-                className="space-y-3"
-              >
-                <div>
-                  <label
-                    htmlFor="adm-uid"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Firebase User UID
-                  </label>
-                  <input
-                    id="adm-uid"
-                    type="text"
-                    value={newAdminUid}
-                    onChange={(e) => setNewAdminUid(e.target.value)}
-                    placeholder="e.g. 9fK2mP..."
-                    className="w-full min-h-[42px] px-3.5 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="adm-name"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Admin Display Name
-                  </label>
-                  <input
-                    id="adm-name"
-                    type="text"
-                    value={newAdminName}
-                    onChange={(e) => setNewAdminName(e.target.value)}
-                    placeholder="Moderator Name"
-                    className="w-full min-h-[42px] px-3.5 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="adm-spec"
-                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Specialty
-                  </label>
-                  <input
-                    id="adm-spec"
-                    type="text"
-                    value={newAdminSpecialty}
-                    onChange={(e) => setNewAdminSpecialty(e.target.value)}
-                    className="w-full min-h-[42px] px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
-                  />
-                </div>
-
-                {adminAddedMsg && (
-                  <div className="p-2.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-xl">
-                    {adminAddedMsg}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="w-full min-h-[42px] bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors"
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setConfigError(null);
+                    setConfigSaved(false);
+                    if (bkashInput.trim().length < 6 || nagadInput.trim().length < 6) {
+                      setConfigError('Please enter valid bKash and Nagad numbers (at least 6 digits).');
+                      return;
+                    }
+                    const nextCfg = sanitizePlatformConfig({
+                      bkashNumber: bkashInput,
+                      nagadNumber: nagadInput,
+                      bkashAccountType: bkashTypeInput,
+                      nagadAccountType: nagadTypeInput,
+                      bkashPaymentLink: bkashLinkInput,
+                      nagadPaymentLink: nagadLinkInput,
+                      escrowLabel: labelInput,
+                      announcement: noticeInput,
+                    });
+                    onSavePlatformConfig?.(nextCfg);
+                    setConfigSaved(true);
+                  }}
+                  className="space-y-3"
                 >
-                  Add Verified Admin
-                </button>
-              </form>
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2.5">
+                    <div>
+                      <label
+                        htmlFor="cfg-bkash"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        bKash Number
+                      </label>
+                      <input
+                        id="cfg-bkash"
+                        type="text"
+                        value={bkashInput}
+                        onChange={(e) => setBkashInput(e.target.value)}
+                        placeholder="e.g. 01755-842190"
+                        className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-bkash-type"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        bKash Type
+                      </label>
+                      <select
+                        id="cfg-bkash-type"
+                        value={bkashTypeInput}
+                        onChange={(e) =>
+                          setBkashTypeInput(e.target.value as 'Personal' | 'Merchant' | 'Agent')
+                        }
+                        className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                      >
+                        <option value="Personal">Personal</option>
+                        <option value="Merchant">Merchant</option>
+                        <option value="Agent">Agent</option>
+                      </select>
+                    </div>
+                  </div>
 
+                  <div>
+                    <label
+                      htmlFor="cfg-bkash-link"
+                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      bKash Online Payment Link (Optional HTTPS)
+                    </label>
+                    <input
+                      id="cfg-bkash-link"
+                      type="url"
+                      value={bkashLinkInput}
+                      onChange={(e) => setBkashLinkInput(e.target.value)}
+                      placeholder="https://shop.bkash.com/..."
+                      className="w-full min-h-[40px] px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2.5">
+                    <div>
+                      <label
+                        htmlFor="cfg-nagad"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Nagad Number
+                      </label>
+                      <input
+                        id="cfg-nagad"
+                        type="text"
+                        value={nagadInput}
+                        onChange={(e) => setNagadInput(e.target.value)}
+                        placeholder="e.g. 01819-000000"
+                        className="w-full min-h-[42px] px-3.5 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-nagad-type"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Nagad Type
+                      </label>
+                      <select
+                        id="cfg-nagad-type"
+                        value={nagadTypeInput}
+                        onChange={(e) =>
+                          setNagadTypeInput(e.target.value as 'Personal' | 'Merchant' | 'Agent')
+                        }
+                        className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                      >
+                        <option value="Personal">Personal</option>
+                        <option value="Merchant">Merchant</option>
+                        <option value="Agent">Agent</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-nagad-link"
+                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Nagad Online Payment Link (Optional HTTPS)
+                    </label>
+                    <input
+                      id="cfg-nagad-link"
+                      type="url"
+                      value={nagadLinkInput}
+                      onChange={(e) => setNagadLinkInput(e.target.value)}
+                      placeholder="https://..."
+                      className="w-full min-h-[40px] px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-label"
+                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Account Label (Personal / Merchant / Agent)
+                    </label>
+                    <input
+                      id="cfg-label"
+                      type="text"
+                      value={labelInput}
+                      onChange={(e) => setLabelInput(e.target.value)}
+                      placeholder="DEALKORO Official Escrow (Personal)"
+                      className="w-full min-h-[42px] px-3.5 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-notice"
+                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Deal Room Payment Notice
+                    </label>
+                    <textarea
+                      id="cfg-notice"
+                      rows={2}
+                      value={noticeInput}
+                      onChange={(e) => setNoticeInput(e.target.value)}
+                      className="w-full px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                    />
+                  </div>
+
+                  {configError && (
+                    <div
+                      role="alert"
+                      className="p-2.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-xl"
+                    >
+                      {configError}
+                    </div>
+                  )}
+
+                  {configSaved && (
+                    <div className="p-2.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-xl">
+                      Official escrow payment numbers saved and synced live!
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="w-full min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors"
+                  >
+                    Save Escrow Numbers
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+
+          {/* Right Card: Smart Verification Team Governance + Team Directory */}
+          <div className="space-y-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                    {isMainAdmin
+                      ? 'Appoint Sub-Admin / Moderator'
+                      : 'Verified Escrow Team'}
+                  </h2>
+                </div>
+                {!isMainAdmin && (
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 inline-flex items-center gap-1">
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Main Admin Controls</span>
+                  </span>
+                )}
+              </div>
+
+              {isMainAdmin ? (
+                <>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Enter candidate Email, BD Mobile, and NID/ID details to issue a 6-digit Smart Verification Code. Once they sign in with Google and confirm those details, they gain payment verification &amp; payout release access.
+                  </p>
+
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setInviteError(null);
+                      setIssuedInvite(null);
+                      if (!onCreateTeamInvite) return;
+                      try {
+                        const created = await onCreateTeamInvite({
+                          candidateName: inviteName,
+                          candidateEmail: inviteEmail,
+                          candidatePhone: invitePhone,
+                          idType: inviteIdType,
+                          idNumber: inviteIdNumber,
+                          staffRole: inviteRole,
+                          specialty: inviteSpecialty,
+                        });
+                        setIssuedInvite(created);
+                        setInviteName('');
+                        setInviteEmail('');
+                        setInvitePhone('');
+                        setInviteIdNumber('');
+                      } catch (err) {
+                        setInviteError(
+                          err instanceof Error
+                            ? err.message
+                            : 'Could not issue smart verification invitation.'
+                        );
+                      }
+                    }}
+                    className="space-y-3"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label
+                          htmlFor="inv-role"
+                          className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          Staff Role
+                        </label>
+                        <select
+                          id="inv-role"
+                          value={inviteRole}
+                          onChange={(e) =>
+                            setInviteRole(
+                              e.target.value === 'moderator' ? 'moderator' : 'sub_admin'
+                            )
+                          }
+                          className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                        >
+                          <option value="sub_admin">Sub-Admin</option>
+                          <option value="moderator">Moderator</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="inv-name"
+                          className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          Candidate Full Name
+                        </label>
+                        <input
+                          id="inv-name"
+                          type="text"
+                          value={inviteName}
+                          onChange={(e) => setInviteName(e.target.value)}
+                          placeholder="e.g. Tanvir Hasan"
+                          required
+                          className="w-full min-h-[42px] px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label
+                          htmlFor="inv-email"
+                          className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          Verified Google Email
+                        </label>
+                        <input
+                          id="inv-email"
+                          type="email"
+                          value={inviteEmail}
+                          onChange={(e) => setInviteEmail(e.target.value)}
+                          placeholder="staff@gmail.com"
+                          required
+                          className="w-full min-h-[42px] px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="inv-phone"
+                          className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          BD Mobile Number
+                        </label>
+                        <input
+                          id="inv-phone"
+                          type="tel"
+                          inputMode="tel"
+                          value={invitePhone}
+                          onChange={(e) => setInvitePhone(e.target.value)}
+                          placeholder="017XXXXXXXX"
+                          required
+                          className="w-full min-h-[42px] px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-[130px_1fr] gap-2.5">
+                      <div>
+                        <label
+                          htmlFor="inv-id-type"
+                          className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          ID Type
+                        </label>
+                        <select
+                          id="inv-id-type"
+                          value={inviteIdType}
+                          onChange={(e) => setInviteIdType(e.target.value as AdminIdType)}
+                          className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                        >
+                          <option value="NID">NID</option>
+                          <option value="Passport">Passport</option>
+                          <option value="StudentID">Student ID</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="inv-id-num"
+                          className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          ID Number (Stored as Last 4 Digits)
+                        </label>
+                        <input
+                          id="inv-id-num"
+                          type="text"
+                          value={inviteIdNumber}
+                          onChange={(e) => setInviteIdNumber(e.target.value)}
+                          placeholder="Full ID or last 4 digits (e.g. 4210)"
+                          required
+                          className="w-full min-h-[42px] px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="inv-spec"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Escrow Specialty
+                      </label>
+                      <input
+                        id="inv-spec"
+                        type="text"
+                        value={inviteSpecialty}
+                        onChange={(e) => setInviteSpecialty(e.target.value)}
+                        className="w-full min-h-[40px] px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+                      />
+                    </div>
+
+                    {inviteError && (
+                      <div
+                        role="alert"
+                        className="p-2.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-xl"
+                      >
+                        {inviteError}
+                      </div>
+                    )}
+
+                    {issuedInvite && (
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-xl space-y-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-emerald-800 dark:text-emerald-300 inline-flex items-center gap-1.5">
+                            <KeyRound className="w-4 h-4" />
+                            <span>Smart Code Issued: </span>
+                            <span className="font-mono text-sm tracking-wider">
+                              {issuedInvite.verificationCode}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const summary = `DEALKORO ${formatStaffRoleLabel(issuedInvite.staffRole)} Invite\nEmail: ${issuedInvite.candidateEmail}\nMobile: ${issuedInvite.candidatePhone}\n${issuedInvite.idType} Last 4: ${issuedInvite.idLast4}\nVerification Code: ${issuedInvite.verificationCode}`;
+                              navigator.clipboard?.writeText(summary);
+                              setCopiedInviteId(issuedInvite.id);
+                              window.setTimeout(() => setCopiedInviteId(null), 1800);
+                            }}
+                            className="min-h-[32px] px-2.5 py-1 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-800 rounded-lg font-semibold text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"
+                          >
+                            {copiedInviteId === issuedInvite.id ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                            <span>{copiedInviteId === issuedInvite.id ? 'Copied' : 'Copy Invite'}</span>
+                          </button>
+                        </div>
+                        <div className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                          Share this code privately with {issuedInvite.candidateName}. It activates automatically when they sign in with {issuedInvite.candidateEmail}.
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      className="w-full min-h-[42px] bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors"
+                    >
+                      Generate Smart Verification Invite
+                    </button>
+                  </form>
+
+                  {/* Invitations Audit List */}
+                  {teamInvites.length > 0 && (
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                      <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Smart Verification Invitations ({teamInvites.length})
+                      </div>
+                      <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                        {teamInvites.map((inv) => (
+                          <div
+                            key={inv.id}
+                            className="p-2.5 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900 dark:text-white truncate">
+                                {inv.candidateName} · {formatStaffRoleLabel(inv.staffRole)} ·{' '}
+                                <span
+                                  className={
+                                    inv.status === 'verified'
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : inv.status === 'revoked'
+                                      ? 'text-red-600 dark:text-red-400'
+                                      : 'text-amber-600 dark:text-amber-400'
+                                  }
+                                >
+                                  {inv.status}
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                                {inv.candidateEmail} · {inv.idType} **{inv.idLast4} · Code:{' '}
+                                {inv.verificationCode}
+                              </div>
+                            </div>
+
+                            {inv.status === 'pending' && onRevokeTeamInvite && (
+                              <button
+                                type="button"
+                                onClick={() => void onRevokeTeamInvite(inv.id)}
+                                aria-label={`Revoke invite for ${inv.candidateName}`}
+                                className="min-h-[32px] px-2.5 py-1 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-lg text-[11px] font-semibold text-red-600 dark:text-red-400 inline-flex items-center gap-1 shrink-0 hover:bg-red-100"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>Revoke</span>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Only Main Project Admin Abdur Rahman ({BOOTSTRAP_ADMIN_EMAIL}) can appoint or remove Sub-Admins and Moderators.
+                </p>
+              )}
+
+              {/* Active Verified Escrow Team Directory */}
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   Verified Escrow Team ({admins.length})
                 </div>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                <div className="space-y-1.5 max-h-56 overflow-y-auto">
                   {admins.map((a) => {
-                    const isProtected = a.uid === user.uid || a.uid === 'admin_abdur';
+                    const isProtected =
+                      a.uid === user.uid ||
+                      a.uid === 'admin_abdur' ||
+                      a.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL;
+                    const verifiedChecks = a.verificationBadges
+                      ? 'Email · Mobile · ID Verified'
+                      : 'Verified Mediator';
                     return (
                       <div
                         key={a.uid}
@@ -1008,10 +1282,13 @@ export function AdminDashboard({
                       >
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900 dark:text-white truncate">
-                            {a.name} ✓
+                            {a.name} ✓ · {formatStaffRoleLabel(a.staffRole)}
                           </div>
-                          <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate">
-                            UID: {a.uid}
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {a.email ? `${a.email} · ` : ''}
+                            {a.phoneMasked ? `${a.phoneMasked} · ` : ''}
+                            {a.idType && a.idLast4 ? `${a.idType} **${a.idLast4} · ` : ''}
+                            {verifiedChecks}
                           </div>
                         </div>
 
@@ -1033,7 +1310,7 @@ export function AdminDashboard({
                             )}
                           </button>
 
-                          {!isProtected && onRemoveVerifiedAdmin ? (
+                          {isMainAdmin && !isProtected && onRemoveVerifiedAdmin ? (
                             <button
                               type="button"
                               onClick={() => onRemoveVerifiedAdmin(a.uid)}
@@ -1044,7 +1321,7 @@ export function AdminDashboard({
                             </button>
                           ) : (
                             <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                              Verified
+                              Active
                             </span>
                           )}
                         </div>
