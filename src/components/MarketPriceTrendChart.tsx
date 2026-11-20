@@ -150,20 +150,22 @@ export function MarketPriceTrendChart({
                   if (!active || !payload || payload.length === 0) return null;
                   const pt = payload[0].payload as {
                     label: string;
-                    avgPrice: number;
+                    avgPrice: number | null;
+                    dayAvgPrice: number | null;
                     listingCount: number;
                   };
+                  if (pt.avgPrice === null) return null;
                   return (
                     <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 shadow-lg text-xs">
                       <div className="font-semibold text-slate-500 dark:text-slate-400">
                         {pt.label}
                       </div>
                       <div className="font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">
-                        {isBn ? 'গড় মূল্য:' : 'Avg Value:'} {formatTk(pt.avgPrice)}
+                        {isBn ? 'বাজার গড়:' : 'Market Avg:'} {formatTk(pt.avgPrice)}
                       </div>
-                      {pt.listingCount > 0 && (
+                      {pt.dayAvgPrice !== null && pt.listingCount > 0 && (
                         <div className="text-[11px] text-blue-600 dark:text-blue-400 mt-0.5 tabular-nums">
-                          {pt.listingCount} {isBn ? 'টি নতুন পোস্ট' : 'listing(s) posted'}
+                          {pt.listingCount} {isBn ? 'টি পোস্ট' : 'posted'} · {isBn ? 'দিনের গড়' : 'Day avg'} {formatTk(pt.dayAvgPrice)}
                         </div>
                       )}
                     </div>
@@ -173,6 +175,7 @@ export function MarketPriceTrendChart({
               <Area
                 type="monotone"
                 dataKey="avgPrice"
+                connectNulls={false}
                 stroke={strokeColor}
                 strokeWidth={2.5}
                 fillOpacity={1}

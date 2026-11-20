@@ -279,21 +279,6 @@ export function AppShell({
 
         <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
           <PWAInstallButton language={language} showGuideFallback />
-          <button
-            type="button"
-            onClick={() => onToggleTheme()}
-            className="w-full min-h-[42px] px-3.5 py-2 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between transition-colors"
-          >
-            <span className="flex items-center gap-3">
-              {theme === 'dark' ? (
-                <Sun className="w-4 h-4 text-amber-400" />
-              ) : (
-                <Moon className="w-4 h-4 text-slate-600" />
-              )}
-              <span>{theme === 'dark' ? t(language, 'lightMode') : t(language, 'darkMode')}</span>
-            </span>
-            <span className="text-[11px] font-semibold text-slate-400 uppercase">{theme}</span>
-          </button>
 
           <button
             type="button"
@@ -470,26 +455,6 @@ export function AppShell({
                     <span>{item.label}</span>
                   </button>
                 ))}
-
-                <button
-                  type="button"
-                  onClick={() => onToggleTheme()}
-                  className="w-full min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between transition-colors"
-                >
-                  <span className="flex items-center gap-3">
-                    {theme === 'dark' ? (
-                      <Sun className="w-4 h-4 text-amber-400" />
-                    ) : (
-                      <Moon className="w-4 h-4" />
-                    )}
-                    <span>
-                      {theme === 'dark' ? t(language, 'lightMode') : t(language, 'darkMode')}
-                    </span>
-                  </span>
-                  <span className="text-[11px] font-semibold text-slate-400 uppercase">
-                    {theme}
-                  </span>
-                </button>
 
                 <button
                   type="button"

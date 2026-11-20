@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BLUEPRINT_LIMITS,
+  buildSearchTermDocId,
   clampPrice,
   clampText,
   formatEscrowPaymentContact,
+  normalizeSearchTerm,
   sanitizeId,
   sanitizeImageUrl,
   sanitizePlatformConfig,
@@ -57,4 +59,15 @@ test('sanitizePlatformConfig and formatEscrowPaymentContact respect length limit
     'Nagad: 01822-333444 (DEALKORO Personal)'
   );
   assert.ok(formatEscrowPaymentContact(cfg).length <= BLUEPRINT_LIMITS.TITLE_MAX);
+});
+
+test('normalizeSearchTerm and buildSearchTermDocId produce deterministic valid Firestore IDs', () => {
+  assert.equal(normalizeSearchTerm('  Ronaldo   3250 '), 'ronaldo 3250');
+  const idA = buildSearchTermDocId('  Ronaldo   3250 ');
+  const idB = buildSearchTermDocId('ronaldo 3250');
+  assert.equal(idA, idB);
+  assert.match(idA, /^[a-zA-Z0-9_\-]+$/);
+  assert.ok(idA.length <= BLUEPRINT_LIMITS.ID_MAX);
+  const unicodeId = buildSearchTermDocId('রোনালদো অ্যাকাউন্ট');
+  assert.match(unicodeId, /^[a-zA-Z0-9_\-]+$/);
 });

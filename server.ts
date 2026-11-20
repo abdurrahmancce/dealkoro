@@ -57,9 +57,40 @@ function maskBdPhoneLocal(raw: string): string {
   return `${normalized.slice(0, 3)}****${normalized.slice(-4)}`;
 }
 
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
+
+function pruneExpiredSessions(): void {
+  const nowMs = Date.now();
+  for (const [id, s] of sessionStore.entries()) {
+    const expMs = Date.parse(s.expiresAt);
+    if (!Number.isNaN(expMs) && nowMs - expMs > SESSION_TTL_MS * 4) {
+      sessionStore.delete(id);
+    }
+  }
+}
+
+function resolveSafeCallbackOrigin(raw: unknown): string {
+  const fallback = `http://localhost:${PORT}`;
+  if (typeof raw !== 'string' || !raw.trim()) return fallback;
+  try {
+    const parsed = new URL(raw.trim());
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return fallback;
+    }
+    return parsed.origin;
+  } catch {
+    return fallback;
+  }
+}
+
 function sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
   const body = JSON.stringify(data);
   res.writeHead(statusCode, {
+    ...SECURITY_HEADERS,
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
   });
@@ -386,15 +417,18 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
 
   if (urlObj.pathname === '/api/payments/session/create' && req.method === 'POST') {
     try {
+      pruneExpiredSessions();
       const body = await readJsonBody(req);
       const dealId = sanitizeIdLocal(String(body.dealId || ''));
       const buyerId = sanitizeIdLocal(String(body.buyerId || ''));
       const method: PaymentMethod = body.method === 'Nagad' ? 'Nagad' : 'bKash';
       const amount = Number(body.amount || 0);
-      const callbackOrigin =
-        typeof body.callbackOrigin === 'string' && body.callbackOrigin.startsWith('http')
-          ? body.callbackOrigin
-          : `http://localhost:${PORT}`;
+      const callbackOrigin = resolveSafeCallbackOrigin(body.callbackOrigin);
+
+      if (!dealId || !buyerId) {
+        sendJson(res, 400, { error: 'Valid dealId and buyerId are required.' });
+        return true;
+      }
 
       if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
         sendJson(res, 400, { error: 'Valid payable amount (1 - 1,000,000 Tk) is required.' });
@@ -491,11 +525,38 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
 
   if (urlObj.pathname === '/api/payments/session/verify' && req.method === 'POST') {
     try {
+      pruneExpiredSessions();
       const body = await readJsonBody(req);
       const sessionId = sanitizeIdLocal(String(body.sessionId || ''));
+      const requestedBuyerId = body.buyerId ? sanitizeIdLocal(String(body.buyerId)) : '';
       const method: PaymentMethod = body.method === 'Nagad' ? 'Nagad' : 'bKash';
       const existing = sessionStore.get(sessionId);
       const envCfg = getGatewayEnvConfig();
+
+      if (existing) {
+        if (requestedBuyerId && existing.buyerId !== requestedBuyerId) {
+          sendJson(res, 403, { ok: false, error: 'Payment session belongs to another user.' });
+          return true;
+        }
+        if (existing.status === 'verified') {
+          sendJson(res, 200, { ok: true, session: existing });
+          return true;
+        }
+        const expiresMs = Date.parse(existing.expiresAt);
+        if (!Number.isNaN(expiresMs) && Date.now() > expiresMs) {
+          const expiredSession: PaymentGatewaySession = {
+            ...existing,
+            status: 'expired',
+            updatedAt: new Date().toISOString(),
+          };
+          sessionStore.set(existing.id, expiredSession);
+          sendJson(res, 410, {
+            ok: false,
+            error: 'Payment session expired. Start a new payment session.',
+          });
+          return true;
+        }
+      }
 
       const gatewayPaymentId = String(
         body.gatewayPaymentId || existing?.gatewayPaymentId || ''
@@ -627,7 +688,10 @@ function serveStaticDist(req: IncomingMessage, res: ServerResponse, urlObj: URL)
 
   const ext = path.extname(filePath).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': contentType });
+  res.writeHead(200, {
+    ...SECURITY_HEADERS,
+    'Content-Type': contentType,
+  });
   fs.createReadStream(filePath).pipe(res);
 }
 
@@ -638,7 +702,7 @@ async function startServer(): Promise<void> {
   if (IS_DEV) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false, ws: false },
       appType: 'spa',
     });
     viteMiddleware = vite.middlewares;

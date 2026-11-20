@@ -137,7 +137,7 @@
     },
     "ListingComment": {
       "title": "ListingComment",
-      "description": "Public comment on a listing.",
+      "description": "Public comment or reply on a listing with bounded user likes.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -145,6 +145,9 @@
         "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "authorName": { "type": "string", "minLength": 1, "maxLength": 80 },
         "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "parentCommentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "replyToAuthor": { "type": "string", "maxLength": 80 },
+        "likedBy": { "type": "array", "description": "Bounded list of UIDs that liked this comment (max 500)." },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "listingId", "authorId", "authorName", "text", "createdAt"]
@@ -315,6 +318,23 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "bkashNumber", "nagadNumber", "escrowLabel", "updatedAt"]
+    },
+    "SearchTermStat": {
+      "title": "SearchTermStat",
+      "description": "Aggregated marketplace search query counts for Admin Dashboard demand analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "term": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "normalizedTerm": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "searchCount": { "type": "number" },
+        "lastCategory": { "type": "string", "enum": ["All", "eFootball", "PUBG Mobile", "Free Fire", "Mobile Legends", "Other"] },
+        "lastResultCount": { "type": "number" },
+        "lastSearchedBy": { "type": "string", "maxLength": 128 },
+        "lastSearchedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "term", "normalizedTerm", "searchCount", "lastSearchedAt", "createdAt"]
     }
   },
   "firestore": {
@@ -336,7 +356,7 @@
     },
     "/listings/{listingId}/comments/{commentId}": {
       "schema": { "$ref": "#/entities/ListingComment" },
-      "description": "Comments under a listing."
+      "description": "Comments and replies under a listing."
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },
@@ -377,6 +397,10 @@
     "/paymentSessions/{sessionId}": {
       "schema": { "$ref": "#/entities/PaymentGatewaySession" },
       "description": "Real-time bKash and Nagad gateway payment sessions linked to escrow deals."
+    },
+    "/searchTerms/{termId}": {
+      "schema": { "$ref": "#/entities/SearchTermStat" },
+      "description": "Aggregated marketplace search term statistics for Admin Dashboard analytics."
     }
   }
 }

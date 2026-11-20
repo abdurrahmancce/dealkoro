@@ -161,6 +161,21 @@ export interface ListingComment {
   authorId: string;
   authorName: string;
   text: string;
+  parentCommentId?: string;
+  replyToAuthor?: string;
+  likedBy?: string[];
+  createdAt: string;
+}
+
+export interface SearchTermStat {
+  id: string;
+  term: string;
+  normalizedTerm: string;
+  searchCount: number;
+  lastCategory?: 'All' | ListingCategory;
+  lastResultCount?: number;
+  lastSearchedBy?: string;
+  lastSearchedAt: string;
   createdAt: string;
 }
 

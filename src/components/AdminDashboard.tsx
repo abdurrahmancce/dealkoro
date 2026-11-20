@@ -28,6 +28,7 @@ import type {
   Listing,
   NotificationItem,
   PlatformEscrowConfig,
+  SearchTermStat,
   StatementEntry,
   TeamVerificationInvite,
   ThemeMode,
@@ -48,6 +49,7 @@ import {
   sanitizePlatformConfig,
 } from '../utils/payloadSanitizer';
 import { CategoryRevenueChart } from './CategoryRevenueChart';
+import { SearchTermAnalysisCard } from './SearchTermAnalysisCard';
 import { ResilientImage } from './ResilientImage';
 
 type DashboardTab = 'overview' | 'deals' | 'payouts' | 'activity' | 'settings';
@@ -62,6 +64,7 @@ interface AdminDashboardProps {
   listings: Listing[];
   statements: StatementEntry[];
   notifications: NotificationItem[];
+  searchTerms?: SearchTermStat[];
   platformConfig?: PlatformEscrowConfig;
   onNavigate: (route: AppRoute) => void;
   onReassignAdmin: (dealId: string, adminId: string) => void;
@@ -103,6 +106,7 @@ export function AdminDashboard({
   listings,
   statements,
   notifications,
+  searchTerms = [],
   platformConfig = DEFAULT_PLATFORM_CONFIG,
   onNavigate,
   onReassignAdmin,
@@ -406,15 +410,24 @@ export function AdminDashboard({
         </div>
       </div>
 
-      {/* Category Escrow Fee Income Breakdown */}
+      {/* Category Escrow Fee Income Breakdown & Search Term Analysis */}
       {activeTab === 'overview' && (
-        <CategoryRevenueChart
-          deals={deals}
-          listings={listings}
-          statements={statements}
-          language={language}
-          theme={theme}
-        />
+        <>
+          <CategoryRevenueChart
+            deals={deals}
+            listings={listings}
+            statements={statements}
+            language={language}
+            theme={theme}
+          />
+          <SearchTermAnalysisCard
+            searchTerms={searchTerms}
+            listings={listings}
+            language={language}
+            theme={theme}
+            filterQuery={searchQuery}
+          />
+        </>
       )}
 
       {/* Section 1: Active Deals */}
@@ -666,55 +679,61 @@ export function AdminDashboard({
             </span>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
-            {recentActivity.map((item) => {
-              const badgeClass =
-                item.kind === 'deal'
-                  ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300'
-                  : item.kind === 'payout'
-                  ? 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
-                  : item.kind === 'listing'
-                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                  : 'bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300';
+          {recentActivity.length === 0 ? (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-400">
+              No platform activity recorded yet.
+            </div>
+          ) : (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
+              {recentActivity.map((item) => {
+                const badgeClass =
+                  item.kind === 'deal'
+                    ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300'
+                    : item.kind === 'payout'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
+                    : item.kind === 'listing'
+                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    : 'bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300';
 
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled={!item.targetRoute}
-                  onClick={() => item.targetRoute && onNavigate(item.targetRoute)}
-                  className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:hover:bg-white dark:disabled:hover:bg-slate-900 transition-colors flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${badgeClass}`}
-                      >
-                        {item.kind}
-                      </span>
-                      <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                        {item.title}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      {item.subtitle}
-                    </div>
-                  </div>
-
-                  <div className="text-right shrink-0">
-                    {item.amountLabel && (
-                      <div className="text-xs font-bold text-slate-900 dark:text-white tabular-nums">
-                        {item.amountLabel}
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={!item.targetRoute}
+                    onClick={() => item.targetRoute && onNavigate(item.targetRoute)}
+                    className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:hover:bg-white dark:disabled:hover:bg-slate-900 transition-colors flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${badgeClass}`}
+                        >
+                          {item.kind}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {item.title}
+                        </span>
                       </div>
-                    )}
-                    <div className="text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
-                      {formatShortTime(item.timestamp)}
+                      <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                        {item.subtitle}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+
+                    <div className="text-right shrink-0">
+                      {item.amountLabel && (
+                        <div className="text-xs font-bold text-slate-900 dark:text-white tabular-nums">
+                          {item.amountLabel}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
+                        {formatShortTime(item.timestamp)}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 
@@ -1275,6 +1294,9 @@ export function AdminDashboard({
                     const verifiedChecks = a.verificationBadges
                       ? 'Email · Mobile · ID Verified'
                       : 'Verified Mediator';
+                    const realDealsCount = deals.filter(
+                      (d) => d.status === 'done' && d.adminId === a.uid
+                    ).length;
                     return (
                       <div
                         key={a.uid}
@@ -1284,11 +1306,11 @@ export function AdminDashboard({
                           <div className="font-semibold text-slate-900 dark:text-white truncate">
                             {a.name} ✓ · {formatStaffRoleLabel(a.staffRole)}
                           </div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate tabular-nums">
                             {a.email ? `${a.email} · ` : ''}
                             {a.phoneMasked ? `${a.phoneMasked} · ` : ''}
                             {a.idType && a.idLast4 ? `${a.idType} **${a.idLast4} · ` : ''}
-                            {verifiedChecks}
+                            {realDealsCount} deals · {verifiedChecks}
                           </div>
                         </div>
 
@@ -1334,23 +1356,29 @@ export function AdminDashboard({
 
             <div className="bg-slate-900 dark:bg-slate-900/95 border border-slate-800 text-white rounded-2xl p-5 space-y-2.5 text-xs">
               <div className="font-bold text-sm text-blue-400">
-                Production Launch &amp; Security Status
+                Live Platform &amp; Security Metrics
               </div>
               <div className="flex items-center justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-300">Firebase Hosting Config</span>
-                <span className="font-semibold text-emerald-400">firebase.json Ready</span>
+                <span className="text-slate-300">Verified Staff Active</span>
+                <span className="font-semibold text-emerald-400 tabular-nums">
+                  {admins.length}
+                </span>
               </div>
               <div className="flex items-center justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-300">Payment Contact Lock</span>
-                <span className="font-semibold text-emerald-400">Anti-Spoof Enforced</span>
+                <span className="text-slate-300">Tracked Search Terms</span>
+                <span className="font-semibold text-blue-400 tabular-nums">
+                  {searchTerms.length}
+                </span>
               </div>
               <div className="flex items-center justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-300">Photo Upload Mode</span>
-                <span className="font-semibold text-emerald-400">Starter Tier Sync Ready</span>
+                <span className="text-slate-300">Escrow Deals Recorded</span>
+                <span className="font-semibold text-white tabular-nums">
+                  {deals.length} ({metrics.completedDealsCount} done)
+                </span>
               </div>
               <div className="flex items-center justify-between py-1">
-                <span className="text-slate-300">Escrow Fee Engine</span>
-                <span className="font-semibold text-white">20 / 60 / +30 / +20 Tk</span>
+                <span className="text-slate-300">Escrow Fee Schedule</span>
+                <span className="font-semibold text-white tabular-nums">20 / 60 / +30 / +20 Tk</span>
               </div>
             </div>
           </div>

@@ -823,28 +823,51 @@ export function DealRoomScreen({
             />
           )}
 
-          {deal.paymentProofNote && (
-            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl space-y-2 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-amber-900 dark:text-amber-200 inline-flex items-center gap-1.5">
-                  <Clock className="w-4 h-4" />
-                  <span>Submitted Proof (Awaiting Admin Verification)</span>
-                </span>
-              </div>
-              <div className="text-slate-800 dark:text-slate-200 font-mono">
-                {deal.paymentProofNote}
-              </div>
-              {deal.paymentProofUrl && (
-                <div className="w-40 h-24 rounded-lg overflow-hidden border border-amber-200 dark:border-amber-800 bg-slate-900">
-                  <ResilientImage
-                    src={deal.paymentProofUrl}
-                    alt="Payment proof"
-                    className="w-full h-full object-cover"
-                  />
+          {deal.paymentProofNote && (() => {
+            const lowerNote = deal.paymentProofNote.toLowerCase();
+            const isSandboxProof = lowerNote.includes('sandbox');
+            const isLiveApiProof = lowerNote.includes('live api verified');
+            return (
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-bold text-amber-900 dark:text-amber-200 inline-flex items-center gap-1.5">
+                    <Clock className="w-4 h-4" />
+                    <span>Submitted Proof (Awaiting Admin Verification)</span>
+                  </span>
+                  {isLiveApiProof ? (
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[11px]">
+                      Live API Verified
+                    </span>
+                  ) : isSandboxProof ? (
+                    <span className="px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 font-bold text-[11px]">
+                      Sandbox Test Proof — Verify Wallet!
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 font-bold text-[11px]">
+                      Manual TrxID — Check Balance
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+                <div className="text-slate-800 dark:text-slate-200 font-mono">
+                  {deal.paymentProofNote}
+                </div>
+                {!isLiveApiProof && (
+                  <div className="text-[11px] font-medium text-red-700 dark:text-red-300">
+                    Admin Notice: Confirm real money received in your bKash/Nagad app before unlocking ID Exchange.
+                  </div>
+                )}
+                {deal.paymentProofUrl && (
+                  <div className="w-40 h-24 rounded-lg overflow-hidden border border-amber-200 dark:border-amber-800 bg-slate-900">
+                    <ResilientImage
+                      src={deal.paymentProofUrl}
+                      alt="Payment proof"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {isAdmin ? (
             <button

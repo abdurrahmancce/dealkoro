@@ -28,9 +28,13 @@ export function AdminQueueScreen({
   onMessageAdmin,
   onOpenDeal,
 }: AdminQueueScreenProps) {
+  const getRealCompletedDeals = (uid: string) =>
+    deals.filter((d) => d.status === 'done' && d.adminId === uid).length;
+
   const selectedAdmin = admins.find((a) => a.uid === selectedAdminId);
 
   if (selectedAdmin) {
+    const completedCount = getRealCompletedDeals(selectedAdmin.uid);
     return (
       <div className="max-w-xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5">
         <div className="flex items-center justify-between gap-3">
@@ -48,7 +52,7 @@ export function AdminQueueScreen({
             </div>
           </div>
 
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold shrink-0">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold shrink-0">
             <span>{t(language, 'verifiedBadge')}</span>
             <CheckCircle2 className="w-3.5 h-3.5" />
           </span>
@@ -60,7 +64,7 @@ export function AdminQueueScreen({
               {formatStaffRoleLabel(selectedAdmin.staffRole)}
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-              {selectedAdmin.completedDeals} deals · {selectedAdmin.rating.toFixed(1)} ★
+              {completedCount} deals · {selectedAdmin.rating.toFixed(1)} ★
               {selectedAdmin.verificationBadges?.idVerified ? ` · ${selectedAdmin.idType || 'ID'} Verified` : ''}
             </div>
           </div>
@@ -107,69 +111,85 @@ export function AdminQueueScreen({
           )}
         </div>
 
-        <div className="space-y-2.5">
-          {admins.map((admin) => (
-            <div
-              key={admin.uid}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-bold text-sm flex items-center justify-center shrink-0">
-                  {admin.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                    {admin.name}
+        {admins.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-400">
+            No verified escrow team members registered yet.
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {admins.map((admin) => {
+              const completedCount = getRealCompletedDeals(admin.uid);
+              return (
+                <div
+                  key={admin.uid}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-bold text-sm flex items-center justify-center shrink-0">
+                      {admin.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                        {admin.name}
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 truncate tabular-nums">
+                        {formatStaffRoleLabel(admin.staffRole)} · {completedCount} deals · {admin.specialty}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    {formatStaffRoleLabel(admin.staffRole)} · {admin.completedDeals} deals · {admin.specialty}
-                  </div>
-                </div>
-              </div>
 
-              <button
-                type="button"
-                onClick={() => onSelectAdmin(admin.uid)}
-                className="min-h-[40px] px-3.5 py-2 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs font-bold rounded-xl inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
-              >
-                <span>✓ {t(language, 'reviewBtn')}</span>
-              </button>
-            </div>
-          ))}
-        </div>
+                  <button
+                    type="button"
+                    onClick={() => onSelectAdmin(admin.uid)}
+                    className="min-h-[40px] px-3.5 py-2 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs font-bold rounded-xl inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    <span>✓ {t(language, 'reviewBtn')}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* Active & Completed Admin Deals Queue */}
       <section className="space-y-3">
         <h2 className="text-base font-bold text-slate-900 dark:text-white">Escrow Deal Queue</h2>
-        <div className="space-y-2.5">
-          {deals.map((deal) => (
-            <button
-              key={deal.id}
-              type="button"
-              onClick={() => onOpenDeal(deal.id)}
-              className="w-full text-left bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 rounded-2xl p-4 flex items-center justify-between gap-3 transition-colors"
-            >
-              <div className="min-w-0">
-                <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                  {deal.title} · {deal.listingTitle}
+        {deals.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-400">
+            No escrow deals recorded yet.
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {deals.map((deal) => (
+              <button
+                key={deal.id}
+                type="button"
+                onClick={() => onOpenDeal(deal.id)}
+                className="w-full text-left bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 rounded-2xl p-4 flex items-center justify-between gap-3 transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                    {deal.title} · {deal.listingTitle}
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    Seller: {deal.sellerName.split(' ')[0]} · Buyer: {deal.buyerName.split(' ')[0]} · Admin: {deal.adminName}
+                  </div>
                 </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                  Seller: {deal.sellerName.split(' ')[0]} · Buyer: {deal.buyerName.split(' ')[0]} · Admin: {deal.adminName}
+                <div className="text-right shrink-0">
+                  <div className="text-sm font-bold text-blue-600 dark:text-blue-400 tabular-nums">
+                    {formatTk(deal.totalAmount)}
+                  </div>
+                  <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                    {deal.status === 'done' ? 'DONE' : deal.status.replace(/_/g, ' ')}
+                  </div>
                 </div>
-              </div>
-              <div className="text-right shrink-0">
-                <div className="text-sm font-bold text-blue-600 dark:text-blue-400 tabular-nums">
-                  {formatTk(deal.totalAmount)}
-                </div>
-                <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                  {deal.status === 'done' ? 'DONE' : deal.status.replace(/_/g, ' ')}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
 }
+

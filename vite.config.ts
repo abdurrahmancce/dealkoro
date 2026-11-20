@@ -86,10 +86,31 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
-          type: 'module',
+          enabled: false,
         },
       }),
+      {
+        name: 'disable-vite-hmr-websocket',
+        apply: 'serve',
+        configureServer(server) {
+          server.middlewares.use('/@vite/client', async (_req, res, next) => {
+            try {
+              const result = await server.transformRequest('/@vite/client');
+              if (!result) return next();
+              const patched = result.code.replace(
+                'transport.connect(createHMRHandler(handleMessage));',
+                '/* HMR WebSocket disabled */'
+              );
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.end(patched);
+            } catch {
+              next();
+            }
+          });
+        },
+      },
       {
         name: 'copy-unbundled-src-assets',
         apply: 'build',
@@ -116,7 +137,8 @@ export default defineConfig(() => {
       port: 3000,
       strictPort: true,
       allowedHosts: true,
-      hmr: process.env.DISABLE_HMR !== 'true',
+      hmr: false,
+      ws: false,
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };

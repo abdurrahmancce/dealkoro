@@ -4,8 +4,11 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit as firestoreLimit,
   onSnapshot,
+  orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -14,7 +17,12 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import type { User as FirebaseUser } from 'firebase/auth';
+import {
+  deleteUser,
+  GoogleAuthProvider,
+  reauthenticateWithPopup,
+  type User as FirebaseUser,
+} from 'firebase/auth';
 import {
   auth,
   db,
@@ -30,11 +38,13 @@ import type {
   Conversation,
   Language,
   Listing,
+  ListingCategory,
   ListingComment,
   NotificationItem,
   PaymentGatewaySession,
   PaymentMethod,
   PlatformEscrowConfig,
+  SearchTermStat,
   StaffRole,
   StatementEntry,
   TeamVerificationInvite,
@@ -43,6 +53,13 @@ import type {
 } from '../types/dealkoro';
 import {
   ASSETS,
+  LEGACY_DEMO_COMMENT_PATHS,
+  LEGACY_DEMO_CONVERSATION_IDS,
+  LEGACY_DEMO_DEAL_IDS,
+  LEGACY_DEMO_LISTING_IDS,
+  LEGACY_DEMO_NOTIFICATION_IDS,
+  LEGACY_DEMO_STATEMENT_IDS,
+  LEGACY_REMOVED_ADMIN_IDS,
   SEED_ADMINS,
   SEED_COMMENTS,
   SEED_CONVERSATIONS,
@@ -54,6 +71,7 @@ import {
 import { calculateDealBreakdown } from '../utils/dealMath';
 import {
   BLUEPRINT_LIMITS,
+  buildSearchTermDocId,
   clampPrice,
   clampText,
   DEFAULT_PLATFORM_CONFIG,
@@ -65,6 +83,7 @@ import {
   normalizeCategory,
   normalizeLinkType,
   normalizePaymentMethod,
+  normalizeSearchTerm,
   normalizeStaffRole,
   sanitizeId,
   sanitizeIdLast4,
@@ -105,14 +124,17 @@ function toIsoString(val: unknown): string {
 
 export function getInitialState(): DealkoroPersistedState {
   let savedLang: Language = 'en';
-  let savedBookmarks: string[] = ['listing_ronaldo_3250'];
+  let savedBookmarks: string[] = [];
+  const legacyListingSet = new Set<string>(LEGACY_DEMO_LISTING_IDS);
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<DealkoroPersistedState>;
       savedLang = parsed.language === 'bn' ? 'bn' : 'en';
       if (Array.isArray(parsed.bookmarks)) {
-        savedBookmarks = parsed.bookmarks;
+        savedBookmarks = parsed.bookmarks.filter(
+          (id): id is string => typeof id === 'string' && !legacyListingSet.has(id)
+        );
       }
     }
   } catch {
@@ -461,24 +483,103 @@ export async function ensureVerifiedAdminsInFirestore(user: UserProfile): Promis
   ) {
     return;
   }
+
+  const mainAgent = SEED_ADMINS[0];
+  if (!mainAgent) return;
+
   try {
-    const existingSnap = await getDocs(collection(db, 'admins'));
-    if (!existingSnap.empty) {
-      return;
+    const mainRef = doc(db, 'admins', mainAgent.uid);
+    const snap = await getDoc(mainRef);
+    if (!snap.exists()) {
+      await setDoc(mainRef, buildAdminAgentDocPayload(mainAgent), { merge: true });
+    } else if (Number(snap.data().completedDeals ?? 0) === 412) {
+      await setDoc(mainRef, { completedDeals: 0 }, { merge: true });
     }
-  } catch {
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `admins/${mainAgent.uid}`);
+  }
+}
+
+export async function purgeLegacySeedDataForMainAdmin(user: UserProfile): Promise<void> {
+  if (
+    !auth.currentUser ||
+    user.email.trim().toLowerCase() !== BOOTSTRAP_ADMIN_EMAIL ||
+    !auth.currentUser.emailVerified
+  ) {
     return;
   }
 
-  for (const agent of SEED_ADMINS) {
-    const path = `admins/${agent.uid}`;
+  // Always ensure legacy removed staff accounts stay permanently deleted from Firestore
+  for (const legacyAdminId of LEGACY_REMOVED_ADMIN_IDS) {
     try {
-      await setDoc(doc(db, 'admins', agent.uid), buildAdminAgentDocPayload(agent), {
-        merge: true,
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      const adminRef = doc(db, 'admins', legacyAdminId);
+      const snap = await getDoc(adminRef);
+      if (snap.exists()) {
+        await deleteDoc(adminRef);
+      }
+    } catch {
+      // Ignore individual cleanup failures
     }
+  }
+
+  const purgeFlagKey = 'dealkoro_legacy_purged_v2';
+  try {
+    if (localStorage.getItem(purgeFlagKey) === '1') {
+      return;
+    }
+  } catch {
+    // Continue purge
+  }
+
+  const deleteTargets: Array<Promise<void>> = [];
+
+  for (const c of LEGACY_DEMO_COMMENT_PATHS) {
+    deleteTargets.push(
+      deleteDoc(doc(db, 'listings', c.listingId, 'comments', c.commentId)).catch(() => {})
+    );
+  }
+  for (const id of LEGACY_DEMO_LISTING_IDS) {
+    deleteTargets.push(deleteDoc(doc(db, 'listings', id)).catch(() => {}));
+  }
+  for (const id of LEGACY_DEMO_CONVERSATION_IDS) {
+    deleteTargets.push(
+      (async () => {
+        try {
+          const msgSnap = await getDocs(collection(db, 'conversations', id, 'messages'));
+          await Promise.all(msgSnap.docs.map((m) => deleteDoc(m.ref).catch(() => {})));
+        } catch {
+          // ignore
+        }
+        await deleteDoc(doc(db, 'conversations', id)).catch(() => {});
+      })()
+    );
+  }
+  for (const id of LEGACY_DEMO_DEAL_IDS) {
+    deleteTargets.push(
+      (async () => {
+        try {
+          const msgSnap = await getDocs(collection(db, 'deals', id, 'messages'));
+          await Promise.all(msgSnap.docs.map((m) => deleteDoc(m.ref).catch(() => {})));
+        } catch {
+          // ignore
+        }
+        await deleteDoc(doc(db, 'deals', id)).catch(() => {});
+      })()
+    );
+  }
+  for (const id of LEGACY_DEMO_NOTIFICATION_IDS) {
+    deleteTargets.push(deleteDoc(doc(db, 'notifications', id)).catch(() => {}));
+  }
+  for (const id of LEGACY_DEMO_STATEMENT_IDS) {
+    deleteTargets.push(deleteDoc(doc(db, 'statements', id)).catch(() => {}));
+  }
+
+  await Promise.all(deleteTargets);
+
+  try {
+    localStorage.setItem(purgeFlagKey, '1');
+  } catch {
+    // ignore storage errors
   }
 }
 
@@ -493,7 +594,6 @@ export function subscribeFirebaseAdmins(
   return onSnapshot(
     collection(db, 'admins'),
     (snapshot) => {
-      if (snapshot.empty) return;
       const items: AdminAgent[] = snapshot.docs
         .map((d) => {
           const data = d.data();
@@ -1027,7 +1127,6 @@ export function subscribeFirebaseListings(
   return onSnapshot(
     q,
     (snapshot) => {
-      if (snapshot.empty) return;
       const remote: Listing[] = snapshot.docs
         .map((d) => {
           const data = d.data();
@@ -1071,12 +1170,16 @@ export function subscribeListingComments(
       const items: ListingComment[] = snapshot.docs
         .map((d) => {
           const data = d.data();
+          const rawLiked = Array.isArray(data.likedBy) ? data.likedBy.map(String) : [];
           return {
             id: d.id,
             listingId: String(data.listingId ?? id),
             authorId: String(data.authorId ?? ''),
             authorName: String(data.authorName ?? 'User'),
             text: String(data.text ?? ''),
+            ...(data.parentCommentId ? { parentCommentId: String(data.parentCommentId) } : {}),
+            ...(data.replyToAuthor ? { replyToAuthor: String(data.replyToAuthor) } : {}),
+            likedBy: rawLiked,
             createdAt: toIsoString(data.createdAt),
           };
         })
@@ -1094,17 +1197,71 @@ export async function persistCommentToFirestore(comment: ListingComment): Promis
   const listingId = sanitizeId(comment.listingId);
   const commentId = sanitizeId(comment.id);
   const path = `listings/${listingId}/comments/${commentId}`;
+  const payload: Record<string, unknown> = {
+    id: commentId,
+    listingId,
+    authorId: auth.currentUser.uid,
+    authorName: clampText(comment.authorName, BLUEPRINT_LIMITS.NAME_MAX, 'User'),
+    text: clampText(comment.text, BLUEPRINT_LIMITS.COMMENT_MAX),
+    likedBy: [],
+    createdAt: serverTimestamp(),
+  };
+  if (comment.parentCommentId) {
+    payload.parentCommentId = sanitizeId(comment.parentCommentId);
+  }
+  if (comment.replyToAuthor) {
+    payload.replyToAuthor = clampText(comment.replyToAuthor, BLUEPRINT_LIMITS.NAME_MAX);
+  }
   try {
-    await setDoc(doc(db, 'listings', listingId, 'comments', commentId), {
-      id: commentId,
-      listingId,
-      authorId: auth.currentUser.uid,
-      authorName: clampText(comment.authorName, BLUEPRINT_LIMITS.NAME_MAX, 'User'),
-      text: clampText(comment.text, BLUEPRINT_LIMITS.COMMENT_MAX),
-      createdAt: serverTimestamp(),
-    });
+    await setDoc(doc(db, 'listings', listingId, 'comments', commentId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function toggleCommentLikeInFirestore(
+  listingId: string,
+  commentId: string,
+  uid: string
+): Promise<void> {
+  if (!auth.currentUser) return;
+  const cleanListingId = sanitizeId(listingId);
+  const cleanCommentId = sanitizeId(commentId);
+  const cleanUid = sanitizeId(uid);
+  const commentRef = doc(db, 'listings', cleanListingId, 'comments', cleanCommentId);
+  const path = `listings/${cleanListingId}/comments/${cleanCommentId}`;
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(commentRef);
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const currentLiked = Array.isArray(data.likedBy) ? data.likedBy.map(String) : [];
+      const hasLiked = currentLiked.includes(cleanUid);
+      const nextLiked = hasLiked
+        ? currentLiked.filter((id) => id !== cleanUid)
+        : currentLiked.length < 500
+        ? [...currentLiked, cleanUid]
+        : currentLiked;
+      tx.update(commentRef, { likedBy: nextLiked });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteCommentFromFirestore(
+  listingId: string,
+  commentId: string
+): Promise<void> {
+  if (!auth.currentUser) return;
+  const cleanListingId = sanitizeId(listingId);
+  const cleanCommentId = sanitizeId(commentId);
+  const path = `listings/${cleanListingId}/comments/${cleanCommentId}`;
+  try {
+    await deleteDoc(doc(db, 'listings', cleanListingId, 'comments', cleanCommentId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
@@ -1737,4 +1894,193 @@ export async function uploadImageFile(
   return {
     error: 'Could not process this screenshot. Try a smaller JPG/PNG photo or paste an HTTPS link.',
   };
+}
+
+export async function recordSearchTermInFirestore(params: {
+  term: string;
+  category?: 'All' | ListingCategory;
+  resultCount?: number;
+}): Promise<void> {
+  if (!auth.currentUser) return;
+  const normalizedTerm = normalizeSearchTerm(params.term);
+  if (normalizedTerm.length < 2) return;
+
+  const displayTerm = clampText(params.term.trim().replace(/\s+/g, ' '), BLUEPRINT_LIMITS.SEARCH_TERM_MAX);
+  if (!displayTerm) return;
+
+  const docId = buildSearchTermDocId(normalizedTerm);
+  const docRef = doc(db, 'searchTerms', docId);
+  const path = `searchTerms/${docId}`;
+  const safeCategory: 'All' | ListingCategory =
+    params.category && params.category !== 'All'
+      ? normalizeCategory(params.category)
+      : 'All';
+  const safeResultCount = Math.max(0, Math.round(params.resultCount ?? 0));
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(docRef);
+      if (snap.exists()) {
+        const currentCount = Number(snap.data().searchCount ?? 0);
+        tx.update(docRef, {
+          term: displayTerm,
+          searchCount: currentCount + 1,
+          lastCategory: safeCategory,
+          lastResultCount: safeResultCount,
+          lastSearchedBy: auth.currentUser!.uid,
+          lastSearchedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(docRef, {
+          id: docId,
+          term: displayTerm,
+          normalizedTerm,
+          searchCount: 1,
+          lastCategory: safeCategory,
+          lastResultCount: safeResultCount,
+          lastSearchedBy: auth.currentUser!.uid,
+          lastSearchedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+        });
+      }
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeSearchTerms(
+  isAdmin: boolean,
+  onUpdate: (items: SearchTermStat[]) => void
+): Unsubscribe {
+  if (!isAdmin) return () => {};
+  const q = query(
+    collection(db, 'searchTerms'),
+    where('searchCount', '>=', 1),
+    orderBy('searchCount', 'desc'),
+    firestoreLimit(25)
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const items: SearchTermStat[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          term: String(data.term ?? ''),
+          normalizedTerm: String(data.normalizedTerm ?? ''),
+          searchCount: Number(data.searchCount ?? 1),
+          lastCategory: (data.lastCategory as SearchTermStat['lastCategory']) || 'All',
+          lastResultCount: Number(data.lastResultCount ?? 0),
+          lastSearchedBy: data.lastSearchedBy ? String(data.lastSearchedBy) : undefined,
+          lastSearchedAt: toIsoString(data.lastSearchedAt),
+          createdAt: toIsoString(data.createdAt),
+        };
+      });
+      onUpdate(items);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'searchTerms');
+    }
+  );
+}
+
+export async function deleteCurrentUserAccountCompletely(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  const fbUser = auth.currentUser;
+  if (!fbUser) {
+    return { ok: false, error: 'You must be signed in to delete your account.' };
+  }
+  const uid = sanitizeId(fbUser.uid);
+  const email = (fbUser.email || '').trim().toLowerCase();
+  if (email === BOOTSTRAP_ADMIN_EMAIL) {
+    return {
+      ok: false,
+      error: 'Main Project Admin account cannot be self-deleted to protect live escrow operations.',
+    };
+  }
+
+  try {
+    // 1. Ensure user is not inside any unsettled active escrow deal
+    const [buyerDealsSnap, sellerDealsSnap] = await Promise.all([
+      getDocs(query(collection(db, 'deals'), where('buyerId', '==', uid))),
+      getDocs(query(collection(db, 'deals'), where('sellerId', '==', uid))),
+    ]);
+    const activeDeals = [...buyerDealsSnap.docs, ...sellerDealsSnap.docs].filter((d) => {
+      const status = String(d.data().status ?? '');
+      return status !== 'done' && status !== 'cancelled';
+    });
+    if (activeDeals.length > 0) {
+      return {
+        ok: false,
+        error: `You currently have ${activeDeals.length} active escrow deal(s). Complete or cancel active deals before deleting your account.`,
+      };
+    }
+
+    // 2. Reauthenticate via Google Popup so verification is fresh before irreversible deletion
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ login_hint: email });
+    await reauthenticateWithPopup(fbUser, provider);
+
+    // 3. Delete all owned listings and their comment subcollections
+    const listingsSnap = await getDocs(
+      query(collection(db, 'listings'), where('sellerId', '==', uid))
+    );
+    for (const listingDoc of listingsSnap.docs) {
+      const commentsSnap = await getDocs(
+        collection(db, 'listings', listingDoc.id, 'comments')
+      );
+      await Promise.all(commentsSnap.docs.map((c) => deleteDoc(c.ref).catch(() => {})));
+      await deleteDoc(listingDoc.ref).catch(() => {});
+    }
+
+    // 4. Delete all conversations & their message subcollections
+    const [buyerConvsSnap, sellerConvsSnap] = await Promise.all([
+      getDocs(query(collection(db, 'conversations'), where('buyerId', '==', uid))),
+      getDocs(query(collection(db, 'conversations'), where('sellerId', '==', uid))),
+    ]);
+    const convDocs = new Map(
+      [...buyerConvsSnap.docs, ...sellerConvsSnap.docs].map((d) => [d.id, d])
+    );
+    for (const convDoc of convDocs.values()) {
+      const msgsSnap = await getDocs(collection(db, 'conversations', convDoc.id, 'messages'));
+      await Promise.all(msgsSnap.docs.map((m) => deleteDoc(m.ref).catch(() => {})));
+      await deleteDoc(convDoc.ref).catch(() => {});
+    }
+
+    // 5. Delete notifications, statements, and paymentSessions belonging to this user
+    const [notifsSnap, stmtsSnap, sessionsSnap] = await Promise.all([
+      getDocs(query(collection(db, 'notifications'), where('recipientId', '==', uid))),
+      getDocs(query(collection(db, 'statements'), where('userId', '==', uid))),
+      getDocs(query(collection(db, 'paymentSessions'), where('buyerId', '==', uid))),
+    ]);
+    await Promise.all([
+      ...notifsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+      ...stmtsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+      ...sessionsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})),
+    ]);
+
+    // 6. Delete admin record (if staff), private PII, and public user profile
+    await deleteDoc(doc(db, 'admins', uid)).catch(() => {});
+    await deleteDoc(doc(db, 'users', uid, 'private', 'info')).catch(() => {});
+    await deleteDoc(doc(db, 'users', uid)).catch(() => {});
+
+    // 7. Delete Firebase Auth account permanently and wipe local preferences
+    await deleteUser(fbUser);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore storage clear error
+    }
+
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Account verification or deletion failed.';
+    if (message.includes('popup-closed-by-user') || message.includes('cancelled-popup-request')) {
+      return { ok: false, error: 'Google verification popup was closed. Please verify again to delete your account.' };
+    }
+    return { ok: false, error: message };
+  }
 }

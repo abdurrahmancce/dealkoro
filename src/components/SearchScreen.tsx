@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Search as SearchIcon, X } from 'lucide-react';
-import type { Language, Listing } from '../types/dealkoro';
+import type { Language, Listing, ListingCategory } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { filterListingsByQuery, formatTk } from '../utils/dealMath';
 
@@ -8,19 +8,57 @@ interface SearchScreenProps {
   language: Language;
   listings: Listing[];
   onOpenListing: (listingId: string) => void;
+  onRecordSearchTerm?: (params: {
+    term: string;
+    category?: 'All' | ListingCategory;
+    resultCount?: number;
+  }) => void;
 }
 
 export function SearchScreen({
   language,
   listings,
   onOpenListing,
+  onRecordSearchTerm,
 }: SearchScreenProps) {
   const [queryText, setQueryText] = useState('');
+  const lastRecordedRef = useRef('');
   const results = filterListingsByQuery(listings, queryText);
+
+  const flushRecord = (termRaw: string, category: 'All' | ListingCategory = 'All') => {
+    const trimmed = termRaw.trim();
+    if (!onRecordSearchTerm || trimmed.length < 2) return;
+    const key = `${category}::${trimmed.toLowerCase()}`;
+    if (lastRecordedRef.current === key) return;
+    lastRecordedRef.current = key;
+    onRecordSearchTerm({
+      term: trimmed,
+      category,
+      resultCount: results.length,
+    });
+  };
+
+  useEffect(() => {
+    const trimmed = queryText.trim();
+    if (!onRecordSearchTerm || trimmed.length < 2) return;
+    const key = `All::${trimmed.toLowerCase()}`;
+    if (lastRecordedRef.current === key) return;
+    const timer = window.setTimeout(() => {
+      flushRecord(trimmed, 'All');
+    }, 750);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryText, results.length]);
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          flushRecord(queryText, 'All');
+        }}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5"
+      >
         <label
           htmlFor="dealkoro-search-input"
           className="block text-sm font-bold text-slate-900 dark:text-white mb-2"
@@ -49,7 +87,7 @@ export function SearchScreen({
             </button>
           )}
         </div>
-      </div>
+      </form>
 
       <div className="space-y-2.5">
         {results.length === 0 ? (
@@ -84,7 +122,10 @@ export function SearchScreen({
                 </span>
                 <button
                   type="button"
-                  onClick={() => onOpenListing(item.id)}
+                  onClick={() => {
+                    flushRecord(queryText, item.category);
+                    onOpenListing(item.id);
+                  }}
                   className="min-h-[40px] px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors whitespace-nowrap"
                 >
                   View
@@ -97,3 +138,4 @@ export function SearchScreen({
     </div>
   );
 }
+

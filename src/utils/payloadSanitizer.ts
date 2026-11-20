@@ -19,6 +19,7 @@ export const BLUEPRINT_LIMITS = {
   NOTIF_MESSAGE_MAX: 240,
   ACCOUNT_DETAILS_MAX: 500,
   REVIEW_COMMENT_MAX: 500,
+  SEARCH_TERM_MAX: 80,
   MAX_PRICE: 1_000_000,
 } as const;
 
@@ -209,3 +210,27 @@ export function formatStaffRoleLabel(role?: string): string {
   if (role === 'moderator') return 'Moderator';
   return 'Sub-Admin';
 }
+
+export function normalizeSearchTerm(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .slice(0, BLUEPRINT_LIMITS.SEARCH_TERM_MAX);
+}
+
+export function buildSearchTermDocId(raw: string): string {
+  const normalized = normalizeSearchTerm(raw);
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i++) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const shortHash = (hash >>> 0).toString(36);
+  const slug = normalized
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+  return sanitizeId(slug ? `term_${slug}_${shortHash}` : `term_q_${shortHash}`, 'term');
+}
+

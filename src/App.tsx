@@ -9,9 +9,12 @@ import type {
   Conversation,
   Language,
   Listing,
+  ListingCategory,
+  ListingComment,
   NotificationItem,
   PaymentGatewaySession,
   PlatformEscrowConfig,
+  SearchTermStat,
   StatementEntry,
   TeamVerificationInvite,
   ThemeMode,
@@ -29,6 +32,8 @@ import {
   createDealInFirestore,
   createTeamInviteInFirestore,
   deleteAdminAgentFromFirestore,
+  deleteCommentFromFirestore,
+  deleteCurrentUserAccountCompletely,
   deleteListingFromFirestore,
   ensureVerifiedAdminsInFirestore,
   getInitialState,
@@ -44,6 +49,8 @@ import {
   persistPaymentSessionToFirestore,
   persistPlatformEscrowConfig,
   persistStatementToFirestore,
+  purgeLegacySeedDataForMainAdmin,
+  recordSearchTermInFirestore,
   resolveUserProfileFromFirebase,
   revokeTeamInviteInFirestore,
   saveLocalPreferences,
@@ -55,12 +62,14 @@ import {
   subscribeFirebaseListings,
   subscribeListingComments,
   subscribePlatformEscrowConfig,
+  subscribeSearchTerms,
   subscribeTeamInvites,
   subscribeUserConversations,
   subscribeUserDeals,
   subscribeUserNotifications,
   subscribeUserStatements,
   syncFirebaseUserProfile,
+  toggleCommentLikeInFirestore,
   updateConversationInFirestore,
   updateDealInFirestore,
   updateListingStatusInFirestore,
@@ -98,6 +107,7 @@ export default function App() {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [teamInvites, setTeamInvites] = useState<TeamVerificationInvite[]>([]);
   const [dealPaymentSessions, setDealPaymentSessions] = useState<PaymentGatewaySession[]>([]);
+  const [searchTerms, setSearchTerms] = useState<SearchTermStat[]>([]);
 
   const currentRoute = routeStack[routeStack.length - 1];
 
@@ -134,13 +144,11 @@ export default function App() {
           if (urlDealId && (gatewayCb || urlDealId.startsWith('deal_'))) {
             return [{ screen: 'deal', dealId: urlDealId }];
           }
-          if (prev.length === 1 && prev[0].screen === 'home' && profile.role === 'admin') {
-            return [{ screen: 'admin_dashboard' }];
-          }
           return prev;
         });
         await syncFirebaseUserProfile(profile).catch(() => {});
         await ensureVerifiedAdminsInFirestore(profile).catch(() => {});
+        await purgeLegacySeedDataForMainAdmin(profile).catch(() => {});
       } catch (err) {
         setAuthError(
           err instanceof Error
@@ -232,6 +240,13 @@ export default function App() {
       }
     );
 
+    const unsubSearchTerms = subscribeSearchTerms(
+      activeUser.role === 'admin',
+      (remoteTerms) => {
+        setSearchTerms(remoteTerms);
+      }
+    );
+
     return () => {
       unsubAdmins();
       unsubListings();
@@ -241,8 +256,9 @@ export default function App() {
       unsubStatements();
       unsubConfig();
       unsubInvites();
+      unsubSearchTerms();
     };
-  }, [state.currentUser?.uid, state.currentUser?.email]);
+  }, [state.currentUser?.uid, state.currentUser?.email, state.currentUser?.role]);
 
   // Subcollection real-time listeners for active detail / chat / deal screens
   useEffect(() => {
@@ -360,6 +376,9 @@ export default function App() {
       await signOut(auth).catch(() => {});
     }
     setState((prev) => ({ ...prev, currentUser: null }));
+    setTeamInvites([]);
+    setSearchTerms([]);
+    setDealPaymentSessions([]);
     setRouteStack([{ screen: 'home' }]);
     setSyncNotice(null);
   };
@@ -436,6 +455,11 @@ export default function App() {
   };
 
   const handleOpenOrCreateChatForListing = (listing: Listing) => {
+    if (listing.sellerId === user.uid) {
+      reportSyncError('You cannot start a buyer negotiation chat on your own listing.');
+      return;
+    }
+
     const existing = state.conversations.find(
       (c) =>
         !c.isSupport &&
@@ -463,8 +487,8 @@ export default function App() {
       listingTitle: listing.title,
       listingPrice: listing.price,
       listingImage: listing.imageUrl,
-      buyerId: user.uid === listing.sellerId ? 'user_salim' : user.uid,
-      buyerName: user.uid === listing.sellerId ? 'Salim Khan' : user.displayName,
+      buyerId: user.uid,
+      buyerName: user.displayName,
       sellerId: listing.sellerId,
       sellerName: listing.sellerName,
       lastMessage: firstMsg.text,
@@ -534,29 +558,43 @@ export default function App() {
     navigateTo({ screen: 'chat', conversationId: newConv.id });
   };
 
-  const handleAddComment = (listingId: string, text: string) => {
+  const handleAddComment = (
+    listingId: string,
+    text: string,
+    replyMeta?: { parentCommentId: string; replyToAuthor: string }
+  ) => {
     const target = state.listings.find((l) => l.id === listingId);
     const now = new Date().toISOString();
-    const newComment = {
-      id: `cmt_${Date.now().toString(36)}`,
+    const newComment: ListingComment = {
+      id: `cmt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
       listingId,
       authorId: user.uid,
       authorName: user.displayName,
       text,
+      ...(replyMeta
+        ? {
+            parentCommentId: replyMeta.parentCommentId,
+            replyToAuthor: replyMeta.replyToAuthor,
+          }
+        : {}),
+      likedBy: [],
       createdAt: now,
     };
-    const newNotif: NotificationItem | null = target
-      ? {
-          id: `notif_${Date.now().toString(36)}`,
-          recipientId: target.sellerId,
-          actorName: user.displayName,
-          message: `Commented on your post: ${target.title}`,
-          targetType: 'listing',
-          targetId: listingId,
-          isRead: false,
-          createdAt: now,
-        }
-      : null;
+    const newNotif: NotificationItem | null =
+      target && target.sellerId !== user.uid
+        ? {
+            id: `notif_${Date.now().toString(36)}`,
+            recipientId: target.sellerId,
+            actorName: user.displayName,
+            message: replyMeta
+              ? `Replied on your post: ${target.title}`
+              : `Commented on your post: ${target.title}`,
+            targetType: 'listing',
+            targetId: listingId,
+            isRead: false,
+            createdAt: now,
+          }
+        : null;
 
     setState((prev) => ({
       ...prev,
@@ -567,11 +605,64 @@ export default function App() {
     }));
 
     void persistCommentToFirestore(newComment).catch(() =>
-      reportSyncError('Sample listing comments stay local; live posts sync across devices.')
+      reportSyncError('Could not post comment to Firestore.')
     );
     if (newNotif) {
       void persistNotificationToFirestore(newNotif).catch(() => {});
     }
+  };
+
+  const handleToggleCommentLike = (listingId: string, commentId: string) => {
+    setState((prev) => ({
+      ...prev,
+      comments: prev.comments.map((cmt) => {
+        if (cmt.id !== commentId) return cmt;
+        const currentLiked = cmt.likedBy ?? [];
+        const hasLiked = currentLiked.includes(user.uid);
+        return {
+          ...cmt,
+          likedBy: hasLiked
+            ? currentLiked.filter((id) => id !== user.uid)
+            : [...currentLiked, user.uid],
+        };
+      }),
+    }));
+    void toggleCommentLikeInFirestore(listingId, commentId, user.uid).catch(() =>
+      reportSyncError('Could not update comment reaction in Firestore.')
+    );
+  };
+
+  const handleDeleteComment = (listingId: string, commentId: string) => {
+    setState((prev) => ({
+      ...prev,
+      comments: prev.comments.filter(
+        (c) => c.id !== commentId && c.parentCommentId !== commentId
+      ),
+    }));
+    void deleteCommentFromFirestore(listingId, commentId).catch(() =>
+      reportSyncError('Could not delete comment from Firestore.')
+    );
+  };
+
+  const handleRecordSearchTerm = (params: {
+    term: string;
+    category?: 'All' | ListingCategory;
+    resultCount?: number;
+  }) => {
+    void recordSearchTermInFirestore(params).catch(() => {});
+  };
+
+  const handleDeleteAccount = async (): Promise<{ ok: boolean; error?: string }> => {
+    const res = await deleteCurrentUserAccountCompletely();
+    if (res.ok) {
+      setState(getInitialState());
+      setTeamInvites([]);
+      setSearchTerms([]);
+      setDealPaymentSessions([]);
+      setRouteStack([{ screen: 'home' }]);
+      setSyncNotice(null);
+    }
+    return res;
   };
 
   const handleSendChatMessage = (conversationId: string, text: string) => {
@@ -1183,6 +1274,7 @@ export default function App() {
           }
           onMessageSeller={handleOpenOrCreateChatForListing}
           onOpenCreatePost={() => navigateTo({ screen: 'create_post' })}
+          onRecordSearchTerm={handleRecordSearchTerm}
         />
       )}
 
@@ -1193,6 +1285,7 @@ export default function App() {
           onOpenListing={(listingId) =>
             navigateTo({ screen: 'post_detail', listingId })
           }
+          onRecordSearchTerm={handleRecordSearchTerm}
         />
       )}
 
@@ -1246,11 +1339,16 @@ export default function App() {
         <ProfileScreen
           user={user}
           language={state.language}
-          theme={theme}
           subScreen={currentRoute.screen}
           listings={state.listings}
           bookmarks={state.bookmarks}
           statements={state.statements}
+          hasActiveDeal={state.deals.some(
+            (d) =>
+              (d.buyerId === user.uid || d.sellerId === user.uid) &&
+              d.status !== 'done' &&
+              d.status !== 'cancelled'
+          )}
           onNavigate={navigateTo}
           onUpdateProfile={(updates) => {
             const nextUser = { ...user, ...updates };
@@ -1260,9 +1358,9 @@ export default function App() {
             void syncFirebaseUserProfile(nextUser).catch(() => {});
           }}
           onToggleLanguage={handleToggleLanguage}
-          onToggleTheme={handleToggleTheme}
           onLogout={() => void handleLogout()}
           onToggleBookmark={handleToggleBookmark}
+          onDeleteAccount={handleDeleteAccount}
         />
       )}
 
@@ -1289,6 +1387,7 @@ export default function App() {
         return (
           <PostDetailScreen
             language={state.language}
+            currentUserId={user.uid}
             listing={listing}
             comments={state.comments.filter((c) => c.listingId === listing.id)}
             isBookmarked={state.bookmarks.includes(listing.id)}
@@ -1296,6 +1395,18 @@ export default function App() {
             onToggleBookmark={() => handleToggleBookmark(listing.id)}
             onMessageSeller={() => handleOpenOrCreateChatForListing(listing)}
             onAddComment={(text) => handleAddComment(listing.id, text)}
+            onToggleCommentLike={(commentId) =>
+              handleToggleCommentLike(listing.id, commentId)
+            }
+            onReplyComment={(parentCommentId, replyToAuthor, text) =>
+              handleAddComment(listing.id, text, {
+                parentCommentId,
+                replyToAuthor,
+              })
+            }
+            onDeleteComment={(commentId) =>
+              handleDeleteComment(listing.id, commentId)
+            }
             onDeleteListing={() => handleDeleteListing(listing.id)}
           />
         );
@@ -1312,6 +1423,7 @@ export default function App() {
           listings={state.listings}
           statements={state.statements}
           notifications={state.notifications}
+          searchTerms={searchTerms}
           platformConfig={state.platformConfig}
           onNavigate={navigateTo}
           onReassignAdmin={handleReassignAdmin}

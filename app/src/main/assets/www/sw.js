@@ -87,7 +87,7 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "3d7499ea57ef3784d2fc4fd84cc53562"
   }, {
     "url": "index.html",
-    "revision": "efe01f6c6c7fab98bfe9015c93e988c1"
+    "revision": "4d5b368b133467e36b35867c16084b51"
   }, {
     "url": "icon.svg",
     "revision": "da51899b20f58783dbdd7b834886f101"
@@ -98,10 +98,13 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "url": "assets/workbox-window.prod.es5-BBnX5xw4.js",
     "revision": null
   }, {
-    "url": "assets/index-xhZBc4T6.js",
+    "url": "assets/index-CWixU364.css",
     "revision": null
   }, {
-    "url": "assets/index-B_c-5n_q.css",
+    "url": "assets/index-CQD1Bgh1.js",
+    "revision": null
+  }, {
+    "url": "assets/aistudio/image_f7842b06.png",
     "revision": null
   }, {
     "url": "assets/aistudio/image_f3d1ddff.png",
@@ -119,10 +122,16 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "url": "assets/aistudio/image_c7117fb3.png",
     "revision": null
   }, {
+    "url": "assets/aistudio/image_b98936c4.png",
+    "revision": null
+  }, {
     "url": "assets/aistudio/image_ab361a13.png",
     "revision": null
   }, {
     "url": "assets/aistudio/image_a7172dd9.png",
+    "revision": null
+  }, {
+    "url": "assets/aistudio/image_456ccc8a.png",
     "revision": null
   }, {
     "url": "assets/aistudio/image_37e0b525.png",

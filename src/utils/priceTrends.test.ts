@@ -57,7 +57,7 @@ const SAMPLE_LISTINGS: Listing[] = [
   },
 ];
 
-test('build30DayPriceTrend produces 30 daily points and accurate category average', () => {
+test('build30DayPriceTrend produces real cumulative daily points without synthetic jitter', () => {
   const ref = new Date('2026-11-18T12:00:00Z');
   const trend = build30DayPriceTrend(SAMPLE_LISTINGS, 'eFootball', ref);
 
@@ -65,8 +65,19 @@ test('build30DayPriceTrend produces 30 daily points and accurate category averag
   assert.equal(trend.sampleCount, 2);
   assert.equal(trend.minPrice, 1500);
   assert.equal(trend.maxPrice, 2500);
+  assert.equal(trend.startAvg, 1500);
   assert.equal(trend.currentAvg, 2000);
+  assert.equal(trend.changePct, 33.3);
+  assert.equal(trend.points[0].avgPrice, null);
+  const nov10 = trend.points.find((p) => p.dateKey === '2026-11-10');
+  const nov17 = trend.points.find((p) => p.dateKey === '2026-11-17');
+  assert.equal(nov10?.avgPrice, 1500);
+  assert.equal(nov10?.dayAvgPrice, 1500);
+  assert.equal(nov10?.listingCount, 1);
+  assert.equal(nov17?.avgPrice, 2000);
+  assert.equal(nov17?.dayAvgPrice, 2500);
   assert.equal(trend.points[29].dateKey, '2026-11-18');
+  assert.equal(trend.points[29].avgPrice, 2000);
 });
 
 test('build30DayPriceTrend returns empty trend when category has no listings', () => {

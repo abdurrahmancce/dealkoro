@@ -1,16 +1,23 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowUpDown,
   Bookmark,
   ChevronRight,
   MessageCircle,
+  Search as SearchIcon,
   ShieldCheck,
   Star,
+  X,
 } from 'lucide-react';
 import type { Language, Listing, ListingCategory, ThemeMode } from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import { ASSETS } from '../data/seedData';
-import { formatTk, sortListings, type ListingSortOption } from '../utils/dealMath';
+import {
+  filterListingsByQuery,
+  formatTk,
+  sortListings,
+  type ListingSortOption,
+} from '../utils/dealMath';
 import { ResilientImage } from './ResilientImage';
 import { MarketPriceTrendChart } from './MarketPriceTrendChart';
 
@@ -23,6 +30,11 @@ interface HomeFeedScreenProps {
   onOpenListing: (listingId: string) => void;
   onMessageSeller: (listing: Listing) => void;
   onOpenCreatePost: () => void;
+  onRecordSearchTerm?: (params: {
+    term: string;
+    category?: 'All' | ListingCategory;
+    resultCount?: number;
+  }) => void;
 }
 
 const CATEGORIES: ('All' | ListingCategory)[] = [
@@ -42,16 +54,36 @@ export function HomeFeedScreen({
   onOpenListing,
   onMessageSeller,
   onOpenCreatePost,
+  onRecordSearchTerm,
 }: HomeFeedScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState<'All' | ListingCategory>('All');
   const [sortBy, setSortBy] = useState<ListingSortOption>('newest');
   const [showAll, setShowAll] = useState(false);
+  const [feedSearch, setFeedSearch] = useState('');
+  const lastRecordedRef = useRef('');
 
   const activeListings = listings.filter((item) => item.status !== 'sold');
-  const filteredListings =
+  const categoryFiltered =
     selectedCategory === 'All'
       ? activeListings
       : activeListings.filter((item) => item.category === selectedCategory);
+  const filteredListings = filterListingsByQuery(categoryFiltered, feedSearch);
+
+  useEffect(() => {
+    const trimmed = feedSearch.trim();
+    if (!onRecordSearchTerm || trimmed.length < 2) return;
+    const key = `${selectedCategory}::${trimmed.toLowerCase()}`;
+    if (lastRecordedRef.current === key) return;
+    const timer = window.setTimeout(() => {
+      lastRecordedRef.current = key;
+      onRecordSearchTerm({
+        term: trimmed,
+        category: selectedCategory,
+        resultCount: filteredListings.length,
+      });
+    }, 750);
+    return () => window.clearTimeout(timer);
+  }, [feedSearch, selectedCategory, filteredListings.length, onRecordSearchTerm]);
 
   const sortedListings = sortListings(filteredListings, sortBy);
   const visibleListings = showAll ? sortedListings : sortedListings.slice(0, 6);
@@ -142,24 +174,62 @@ export function HomeFeedScreen({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-2 mb-4">
-          {CATEGORIES.map((category) => {
-            const active = selectedCategory === category;
-            return (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
+            {CATEGORIES.map((category) => {
+              const active = selectedCategory === category;
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => setSelectedCategory(category)}
+                  className={`min-h-[40px] px-3.5 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
+                    active
+                      ? 'bg-slate-900 dark:bg-blue-600 text-white'
+                      : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {category}
+                </button>
+              );
+            })}
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const trimmed = feedSearch.trim();
+              if (onRecordSearchTerm && trimmed.length >= 2) {
+                lastRecordedRef.current = `${selectedCategory}::${trimmed.toLowerCase()}`;
+                onRecordSearchTerm({
+                  term: trimmed,
+                  category: selectedCategory,
+                  resultCount: filteredListings.length,
+                });
+              }
+            }}
+            className="relative w-full sm:w-64 shrink-0"
+          >
+            <SearchIcon className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="search"
+              value={feedSearch}
+              onChange={(e) => setFeedSearch(e.target.value)}
+              placeholder={t(language, 'searchPlaceholder')}
+              aria-label={t(language, 'search')}
+              className="w-full min-h-[40px] pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600"
+            />
+            {feedSearch && (
               <button
-                key={category}
                 type="button"
-                onClick={() => setSelectedCategory(category)}
-                className={`min-h-[40px] px-3.5 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                  active
-                    ? 'bg-slate-900 dark:bg-blue-600 text-white'
-                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
+                onClick={() => setFeedSearch('')}
+                aria-label="Clear feed search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 flex items-center justify-center"
               >
-                {category}
+                <X className="w-3.5 h-3.5" />
               </button>
-            );
-          })}
+            )}
+          </form>
         </div>
 
         {/* Product Card Grid */}

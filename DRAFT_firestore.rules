@@ -182,13 +182,30 @@ service cloud.firestore {
 
     function isValidComment(data, commentId, listingId) {
       return data.keys().hasAll(['id', 'listingId', 'authorId', 'authorName', 'text', 'createdAt'])
-        && data.keys().hasOnly(['id', 'listingId', 'authorId', 'authorName', 'text', 'createdAt'])
+        && data.keys().hasOnly(['id', 'listingId', 'authorId', 'authorName', 'text', 'parentCommentId', 'replyToAuthor', 'likedBy', 'createdAt'])
         && data.id == commentId
         && data.listingId == listingId
-        && data.authorId == request.auth.uid
+        && isValidId(data.authorId)
         && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80
         && data.text is string && data.text.size() >= 1 && data.text.size() <= 500
-        && data.createdAt == request.time;
+        && (!('parentCommentId' in data) || isValidId(data.parentCommentId))
+        && (!('replyToAuthor' in data) || (data.replyToAuthor is string && data.replyToAuthor.size() <= 80))
+        && (!('likedBy' in data) || (data.likedBy is list && data.likedBy.size() <= 500 && (data.likedBy.size() == 0 || data.likedBy[0] is string)))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSearchTerm(data, termId) {
+      return data.keys().hasAll(['id', 'term', 'normalizedTerm', 'searchCount', 'lastSearchedAt', 'createdAt'])
+        && data.keys().hasOnly(['id', 'term', 'normalizedTerm', 'searchCount', 'lastCategory', 'lastResultCount', 'lastSearchedBy', 'lastSearchedAt', 'createdAt'])
+        && data.id == termId
+        && data.term is string && data.term.size() >= 1 && data.term.size() <= 80
+        && data.normalizedTerm is string && data.normalizedTerm.size() >= 2 && data.normalizedTerm.size() <= 80
+        && data.searchCount is number && data.searchCount >= 1
+        && (!('lastCategory' in data) || (data.lastCategory in ['All', 'eFootball', 'PUBG Mobile', 'Free Fire', 'Mobile Legends', 'Other']))
+        && (!('lastResultCount' in data) || (data.lastResultCount is number && data.lastResultCount >= 0))
+        && (!('lastSearchedBy' in data) || (data.lastSearchedBy == request.auth.uid))
+        && data.lastSearchedAt == request.time
+        && data.createdAt is timestamp;
     }
 
     function isValidConversation(data, convId) {
@@ -344,17 +361,17 @@ service cloud.firestore {
           isAdmin() ||
           (isVerifiedUser() && isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatarUrl', 'updatedAt']))
         );
-      allow delete: if isAdmin();
+      allow delete: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && isOwner(userId)));
 
       match /private/{docId} {
         allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
         allow list: if isOwner(userId) || isBootstrapAdmin();
         allow create, update: if isValidId(userId) && isValidId(docId) && isVerifiedUser() && (isOwner(userId) || isAdmin()) && isValidUserPrivate(incoming(), userId);
-        allow delete: if isOwner(userId) || isAdmin();
+        allow delete: if isValidId(userId) && isValidId(docId) && ((isVerifiedUser() && isOwner(userId)) || isAdmin());
       }
     }
 
-    // Verified admin mediators (Main Admin appoints/updates/deletes; invited staff self-claim atomically)
+    // Verified admin mediators (Main Admin appoints/updates/deletes; invited staff self-claim atomically or self-delete account)
     match /admins/{adminId} {
       allow get: if isValidId(adminId) && isSignedIn();
       allow list: if isSignedIn() && resource.data.verified in [true, false];
@@ -376,7 +393,12 @@ service cloud.firestore {
           )
         );
       allow update: if isValidId(adminId) && isMainAdmin() && isValidAdminAgent(incoming(), adminId);
-      allow delete: if isValidId(adminId) && isMainAdmin() && adminId != 'admin_abdur' && adminId != request.auth.uid;
+      allow delete: if isValidId(adminId)
+        && adminId != 'admin_abdur'
+        && (
+          (isMainAdmin() && adminId != request.auth.uid) ||
+          (isVerifiedUser() && adminId == request.auth.uid)
+        );
     }
 
     // Smart verification invitations issued exclusively by Main Project Admin
@@ -410,7 +432,7 @@ service cloud.firestore {
       allow delete: if isValidId(inviteId) && isMainAdmin();
     }
 
-    // Public marketplace listings
+    // Public marketplace listings & comments with likes/replies
     match /listings/{listingId} {
       allow get: if isValidId(listingId);
       allow list: if resource.data.status in ['active', 'in_deal', 'sold'];
@@ -436,9 +458,49 @@ service cloud.firestore {
           && isValidId(commentId)
           && isVerifiedUser()
           && exists(/databases/$(database)/documents/listings/$(listingId))
-          && isValidComment(incoming(), commentId, listingId);
-        allow delete: if isValidId(listingId) && isValidId(commentId) && (isAdmin() || (isVerifiedUser() && existing().authorId == request.auth.uid));
+          && isValidComment(incoming(), commentId, listingId)
+          && incoming().authorId == request.auth.uid
+          && incoming().createdAt == request.time
+          && (!('likedBy' in incoming()) || incoming().likedBy.size() == 0);
+        allow update: if isValidId(listingId)
+          && isValidId(commentId)
+          && isVerifiedUser()
+          && isValidComment(incoming(), commentId, listingId)
+          && incoming().authorId == existing().authorId
+          && incoming().authorName == existing().authorName
+          && incoming().text == existing().text
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['likedBy'])
+          && 'likedBy' in incoming()
+          && incoming().likedBy.size() <= existing().get('likedBy', []).size() + 1;
+        allow delete: if isValidId(listingId)
+          && isValidId(commentId)
+          && (
+            isAdmin() ||
+            (isVerifiedUser() && (
+              existing().authorId == request.auth.uid ||
+              get(/databases/$(database)/documents/listings/$(listingId)).data.sellerId == request.auth.uid
+            ))
+          );
       }
+    }
+
+    // Aggregated marketplace search term analytics
+    match /searchTerms/{termId} {
+      allow get: if isValidId(termId) && isSignedIn();
+      allow list: if isBootstrapAdmin() || (isSignedIn() && resource.data.searchCount >= 1 && resource.data.normalizedTerm is string);
+      allow create: if isValidId(termId)
+        && isVerifiedUser()
+        && isValidSearchTerm(incoming(), termId)
+        && incoming().searchCount == 1
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(termId)
+        && isVerifiedUser()
+        && isValidSearchTerm(incoming(), termId)
+        && incoming().normalizedTerm == existing().normalizedTerm
+        && incoming().createdAt == existing().createdAt
+        && incoming().searchCount == existing().searchCount + 1;
+      allow delete: if isValidId(termId) && isMainAdmin();
     }
 
     // Direct buyer-seller conversations
@@ -463,6 +525,7 @@ service cloud.firestore {
           isAdmin() ||
           (isVerifiedUser() && isConvMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'unreadCount', 'negotiatedPrice', 'offerStatus', 'dealId', 'updatedAt']))
         );
+      allow delete: if isValidId(conversationId) && (isMainAdmin() || (isVerifiedUser() && isConvMember(existing())));
 
       match /messages/{messageId} {
         function parentConv() {
@@ -476,6 +539,7 @@ service cloud.firestore {
           && isVerifiedUser()
           && isConvMember(parentConv())
           && isValidMessage(incoming(), messageId);
+        allow delete: if isValidId(conversationId) && isValidId(messageId) && (isMainAdmin() || (isVerifiedUser() && isConvMember(parentConv())));
       }
     }
 
@@ -490,8 +554,13 @@ service cloud.firestore {
       allow create: if isValidId(dealId)
         && isVerifiedUser()
         && isValidDeal(incoming(), dealId)
+        && exists(/databases/$(database)/documents/listings/$(incoming().listingId))
         && incoming().buyerId != incoming().sellerId
         && incoming().agreedAmount >= 50
+        && (!('serviceFee' in incoming()) || incoming().serviceFee == 0)
+        && (!('crossDealFee' in incoming()) || incoming().crossDealFee == 0)
+        && (!('verificationFee' in incoming()) || incoming().verificationFee == 0)
+        && (!('totalAmount' in incoming()) || incoming().totalAmount == incoming().agreedAmount)
         && (incoming().buyerId == request.auth.uid || incoming().sellerId == request.auth.uid)
         && incoming().status == 'confirming'
         && incoming().buyerInitialDone == false
@@ -518,6 +587,10 @@ service cloud.firestore {
                 existing().status in ['confirming', 'finding_admin', 'service_select', 'payment_method', 'cross_deal', 'verification_checks', 'cost_summary']
                 && incoming().status in ['finding_admin', 'service_select', 'payment_method', 'cross_deal', 'verification_checks', 'cost_summary', 'payment_instruction', 'cancelled']
                 && incoming().buyerInitialDone == false
+                && incoming().sellerExchanged == existing().sellerExchanged
+                && incoming().adminId == existing().adminId
+                && incoming().totalAmount >= incoming().agreedAmount
+                && (!('serviceType' in incoming()) || incoming().serviceType != 'ultimate_safe' || incoming().serviceFee == 60)
                 && incoming().diff(existing()).affectedKeys().hasOnly([
                   'serviceType', 'serviceFee', 'buyerMethod', 'sellerMethod',
                   'crossDealRequired', 'crossDealAccepted', 'crossDealFee',
@@ -548,6 +621,7 @@ service cloud.firestore {
             )
           )
         );
+      allow delete: if isValidId(dealId) && isMainAdmin();
 
       match /messages/{messageId} {
         function parentDeal() {
@@ -561,6 +635,7 @@ service cloud.firestore {
           && isVerifiedUser()
           && (isDealParticipant(parentDeal()) || isAdmin())
           && isValidMessage(incoming(), messageId);
+        allow delete: if isValidId(dealId) && isValidId(messageId) && isMainAdmin();
       }
 
       match /reviews/{reviewId} {
@@ -587,6 +662,7 @@ service cloud.firestore {
         && isValidNotification(incoming(), notificationId)
         && (!('targetType' in incoming()) || incoming().targetType != 'system' || isAdmin());
       allow update: if isValidId(notificationId) && isVerifiedUser() && existing().recipientId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+      allow delete: if isValidId(notificationId) && (isMainAdmin() || (isVerifiedUser() && existing().recipientId == request.auth.uid));
     }
 
     // Financial statements (strictly admin-verified for payouts & fee income)
@@ -594,6 +670,7 @@ service cloud.firestore {
       allow get: if isValidId(statementId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrapAdmin());
       allow create: if isValidId(statementId) && isVerifiedUser() && isValidStatement(incoming(), statementId) && isAdmin();
+      allow delete: if isValidId(statementId) && (isMainAdmin() || (isVerifiedUser() && existing().userId == request.auth.uid));
     }
 
     // Platform escrow payment settings (readable by signed-in traders, writable only by Main Project Admin)
@@ -611,12 +688,15 @@ service cloud.firestore {
         && isVerifiedUser()
         && isValidPaymentSession(incoming(), sessionId)
         && incoming().buyerId == request.auth.uid
-        && exists(/databases/$(database)/documents/deals/$(incoming().dealId))
+        && get(/databases/$(database)/documents/deals/$(incoming().dealId)).data.buyerId == request.auth.uid
         && incoming().createdAt == request.time;
       allow update: if isValidId(sessionId)
         && isValidPaymentSession(incoming(), sessionId)
         && incoming().buyerId == existing().buyerId
         && incoming().dealId == existing().dealId
+        && incoming().amount == existing().amount
+        && incoming().mode == existing().mode
+        && incoming().gatewayPaymentId == existing().gatewayPaymentId
         && incoming().createdAt == existing().createdAt
         && (
           isAdmin() ||
@@ -627,6 +707,7 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'trxId', 'senderMasked', 'updatedAt'])
           )
         );
+      allow delete: if isValidId(sessionId) && (isMainAdmin() || (isVerifiedUser() && existing().buyerId == request.auth.uid));
     }
   }
 }

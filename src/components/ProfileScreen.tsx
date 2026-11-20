@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  AlertTriangle,
   Bookmark,
   Check,
   ChevronRight,
@@ -8,11 +9,10 @@ import {
   HelpCircle,
   Lock,
   LogOut,
-  Moon,
   Settings,
   ShieldCheck,
   Star,
-  Sun,
+  Trash2,
   User as UserIcon,
   Wallet,
 } from 'lucide-react';
@@ -22,7 +22,6 @@ import type {
   Listing,
   PaymentMethod,
   StatementEntry,
-  ThemeMode,
   UserProfile,
 } from '../types/dealkoro';
 import { t } from '../i18n/translations';
@@ -32,7 +31,6 @@ import { ResilientImage } from './ResilientImage';
 interface ProfileScreenProps {
   user: UserProfile;
   language: Language;
-  theme: ThemeMode;
   subScreen:
     | 'profile'
     | 'your_posts'
@@ -45,34 +43,137 @@ interface ProfileScreenProps {
   listings: Listing[];
   bookmarks: string[];
   statements: StatementEntry[];
+  hasActiveDeal?: boolean;
   onNavigate: (route: AppRoute) => void;
   onUpdateProfile: (updates: Partial<UserProfile>) => void;
   onToggleLanguage: (lang: Language) => void;
-  onToggleTheme: (next?: ThemeMode) => void;
   onLogout: () => void;
   onToggleBookmark: (listingId: string) => void;
+  onDeleteAccount?: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function ProfileScreen({
   user,
   language,
-  theme,
   subScreen,
   listings,
   bookmarks,
   statements,
+  hasActiveDeal = false,
   onNavigate,
   onUpdateProfile,
   onToggleLanguage,
-  onToggleTheme,
   onLogout,
   onToggleBookmark,
+  onDeleteAccount,
 }: ProfileScreenProps) {
   const [editName, setEditName] = useState(user.displayName);
   const [editPhone, setEditPhone] = useState(user.phone);
   const [editPayout, setEditPayout] = useState<PaymentMethod>(user.payoutMethod);
   const [savedNotice, setSavedNotice] = useState(false);
   const [copiedUid, setCopiedUid] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const isMainAdmin =
+    user.email.trim().toLowerCase() === 'akash.abdur.2002@gmail.com' ||
+    user.staffRole === 'main_admin';
+
+  const handleVerifiedDeleteAccount = async () => {
+    if (!onDeleteAccount || deletingAccount) return;
+    if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') {
+      setDeleteError('Type DELETE in the confirmation box first.');
+      return;
+    }
+    setDeleteError(null);
+    setDeletingAccount(true);
+    try {
+      const res = await onDeleteAccount();
+      if (!res.ok) {
+        setDeleteError(res.error || 'Could not delete account.');
+      }
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : 'Account verification failed.'
+      );
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const renderDeleteAccountSection = () => {
+    if (!onDeleteAccount) return null;
+    return (
+      <div className="p-4 bg-red-50/70 dark:bg-red-950/30 border border-red-200 dark:border-red-900/70 rounded-xl space-y-3">
+        <div className="flex items-center gap-2 text-sm font-bold text-red-700 dark:text-red-400">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{t(language, 'deleteAccount')}</span>
+        </div>
+
+        {isMainAdmin ? (
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            Main Project Admin account is protected from self-deletion while governing active escrow operations.
+          </p>
+        ) : hasActiveDeal ? (
+          <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+            You currently have an active unsettled escrow deal. Complete or cancel all active deals before permanently deleting your account.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+              {language === 'bn'
+                ? 'এটি আপনার সকল পোস্ট, কমেন্ট, মেসেজ, স্টেটমেন্ট, নোটিফিকেশন এবং প্রোফাইল ডাটাবেস থেকে স্থায়ীভাবে মুছে ফেলবে। নিশ্চিত করতে Google ভেরিফিকেশন লাগবে।'
+                : 'This permanently deletes your profile, listings, comments, messages, statements, and notifications from DEALKORO. Google re-verification is required.'}
+            </p>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="delete-account-confirm"
+                className="block text-[11px] font-semibold text-red-800 dark:text-red-300"
+              >
+                Type <span className="font-mono font-bold">DELETE</span> to unlock permanent deletion:
+              </label>
+              <input
+                id="delete-account-confirm"
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => {
+                  setDeleteConfirmText(e.target.value);
+                  if (deleteError) setDeleteError(null);
+                }}
+                placeholder="Type DELETE"
+                className="w-full min-h-[40px] px-3 py-2 text-xs font-mono bg-white dark:bg-slate-900 border border-red-300 dark:border-red-800 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500/30"
+              />
+            </div>
+
+            {deleteError && (
+              <div
+                role="alert"
+                className="p-2.5 text-xs font-medium text-red-700 dark:text-red-300 bg-white/80 dark:bg-slate-900/70 border border-red-200 dark:border-red-800 rounded-lg"
+              >
+                {deleteError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={deletingAccount || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+              onClick={() => void handleVerifiedDeleteAccount()}
+              className="w-full min-h-[42px] px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>
+                {deletingAccount
+                  ? 'Verifying & Deleting...'
+                  : t(language, 'deleteAccountConfirmBtn')}
+              </span>
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
 
   const handleCopyUid = () => {
     navigator.clipboard?.writeText(user.uid);
@@ -232,50 +333,13 @@ export function ProfileScreen({
     );
   }
 
-  // Settings Subscreen (Language + Dark/Light Mode)
+  // Settings Subscreen (Language + Account Controls)
   if (subScreen === 'settings') {
     return (
       <div className="max-w-xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5">
         <h1 className="text-lg font-bold text-slate-900 dark:text-white">
           {t(language, 'settings')}
         </h1>
-
-        <div className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800">
-          <div>
-            <div className="text-sm font-semibold text-slate-900 dark:text-white">
-              {t(language, 'appearance')}
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              {language === 'bn' ? 'লাইট বা ডার্ক মোড নির্বাচন করুন' : 'Switch Light or Dark mode'}
-            </div>
-          </div>
-          <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-            <button
-              type="button"
-              onClick={() => onToggleTheme('light')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 ${
-                theme === 'light'
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300'
-              }`}
-            >
-              <Sun className="w-3.5 h-3.5 text-amber-500" />
-              <span>{t(language, 'lightMode')}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onToggleTheme('dark')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 ${
-                theme === 'dark'
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300'
-              }`}
-            >
-              <Moon className="w-3.5 h-3.5 text-blue-400" />
-              <span>{t(language, 'darkMode')}</span>
-            </button>
-          </div>
-        </div>
 
         <div className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800">
           <div>
@@ -318,6 +382,8 @@ export function ProfileScreen({
             {user.role.toUpperCase()}
           </span>
         </div>
+
+        {renderDeleteAccountSection()}
       </div>
     );
   }
@@ -370,6 +436,8 @@ export function ProfileScreen({
         <div className="p-4 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-xl text-xs text-emerald-800 dark:text-emerald-300">
           Escrow Deal Verification is active. Never share Konami or Google credentials outside an official Admin Deal group chat.
         </div>
+
+        {renderDeleteAccountSection()}
       </div>
     );
   }
