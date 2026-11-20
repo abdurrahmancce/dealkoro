@@ -394,11 +394,82 @@ export function computeDailyAdminFeeTrend(
   return points;
 }
 
+export interface ThirtyDayRevenuePoint extends DailyRevenuePoint {
+  cumulativeFee: number;
+}
+
+export interface ThirtyDayRevenueSummary {
+  startDate: string;
+  endDate: string;
+  totalFeeIncome: number;
+  totalDealVolume: number;
+  totalSettlements: number;
+  activeDays: number;
+  dailyAverage: number;
+  peakDay: {
+    dateKey: string;
+    label: string;
+    releasedFee: number;
+    entryCount: number;
+  } | null;
+}
+
 export function compute30DayAdminFeeTrend(
   statements: StatementEntry[],
   referenceDate: Date = new Date()
 ): DailyRevenuePoint[] {
   return computeDailyAdminFeeTrend(statements, undefined, referenceDate);
+}
+
+export function compute30DayRevenueAnalytics(
+  statements: StatementEntry[],
+  referenceDate: Date = new Date()
+): {
+  points: ThirtyDayRevenuePoint[];
+  summary: ThirtyDayRevenueSummary;
+} {
+  const basePoints = compute30DayAdminFeeTrend(statements, referenceDate);
+  let runningFee = 0;
+  let totalDealVolume = 0;
+  let totalSettlements = 0;
+  let activeDays = 0;
+  let peakDay: ThirtyDayRevenueSummary['peakDay'] = null;
+
+  const points: ThirtyDayRevenuePoint[] = basePoints.map((pt) => {
+    runningFee += pt.releasedFee;
+    totalDealVolume += pt.dealVolume;
+    totalSettlements += pt.entryCount;
+    if (pt.releasedFee > 0) {
+      activeDays += 1;
+    }
+    if (pt.releasedFee > 0 && (!peakDay || pt.releasedFee > peakDay.releasedFee)) {
+      peakDay = {
+        dateKey: pt.dateKey,
+        label: pt.label,
+        releasedFee: pt.releasedFee,
+        entryCount: pt.entryCount,
+      };
+    }
+    return {
+      ...pt,
+      cumulativeFee: runningFee,
+    };
+  });
+
+  const dayCount = points.length || 30;
+  return {
+    points,
+    summary: {
+      startDate: points[0]?.dateKey ?? '',
+      endDate: points[points.length - 1]?.dateKey ?? '',
+      totalFeeIncome: runningFee,
+      totalDealVolume,
+      totalSettlements,
+      activeDays,
+      dailyAverage: Math.round(runningFee / dayCount),
+      peakDay,
+    },
+  };
 }
 
 export function computeAdminDashboardMetrics(params: {

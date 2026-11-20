@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   buildRecentPlatformActivity,
   compute30DayAdminFeeTrend,
+  compute30DayRevenueAnalytics,
   computeAdminDashboardMetrics,
   computeCategoryFeeBreakdown,
   computeDailyAdminFeeTrend,
@@ -382,4 +383,60 @@ test('date range filters both computeCategoryFeeBreakdown and computeDailyAdminF
     endDate: '2026-12-10',
   });
   assert.equal(futureEmpty.reduce((s, r) => s + r.totalFee, 0), 0);
+});
+
+test('compute30DayRevenueAnalytics computes 30-day cumulative series, average, active days, and peak day', () => {
+  const ref = new Date('2026-11-18T12:00:00Z');
+  const statements: StatementEntry[] = [
+    ...TEST_STATEMENTS, // 2026-11-16: 70
+    {
+      id: 'stmt_nov18_fee',
+      userId: 'admin_abdur',
+      dealId: 'deal_2000_active',
+      title: 'Escrow Fee Income: Ronaldo Squad',
+      type: 'admin_fee_income',
+      amount: 110,
+      feeAmount: 0,
+      netAmount: 110,
+      method: 'Nagad',
+      createdAt: '2026-11-18T09:00:00Z',
+    },
+    {
+      id: 'stmt_nov18_sell',
+      userId: 'user_abdullah',
+      dealId: 'deal_2000_active',
+      title: 'Seller Payout: Ronaldo Squad',
+      type: 'sell_income',
+      amount: 2000,
+      feeAmount: 0,
+      netAmount: 2000,
+      method: 'bKash',
+      createdAt: '2026-11-18T09:00:00Z',
+    },
+  ];
+
+  const { points, summary } = compute30DayRevenueAnalytics(statements, ref);
+  assert.equal(points.length, 30);
+  assert.equal(summary.startDate, '2026-10-20');
+  assert.equal(summary.endDate, '2026-11-18');
+  assert.equal(summary.totalFeeIncome, 180);
+  assert.equal(summary.totalDealVolume, 2000);
+  assert.equal(summary.totalSettlements, 2);
+  assert.equal(summary.activeDays, 2);
+  assert.equal(summary.dailyAverage, 6);
+  assert.equal(summary.peakDay?.dateKey, '2026-11-18');
+  assert.equal(summary.peakDay?.releasedFee, 110);
+
+  const nov16 = points.find((p) => p.dateKey === '2026-11-16');
+  const nov17 = points.find((p) => p.dateKey === '2026-11-17');
+  const nov18 = points.find((p) => p.dateKey === '2026-11-18');
+  assert.equal(nov16?.cumulativeFee, 70);
+  assert.equal(nov17?.cumulativeFee, 70);
+  assert.equal(nov18?.cumulativeFee, 180);
+
+  const empty = compute30DayRevenueAnalytics([], ref);
+  assert.equal(empty.points.length, 30);
+  assert.equal(empty.summary.totalFeeIncome, 0);
+  assert.equal(empty.summary.activeDays, 0);
+  assert.equal(empty.summary.peakDay, null);
 });

@@ -58,9 +58,20 @@ interface OnlineWalletCheckoutProps {
 
 type CheckoutTabMode = 'gateway' | 'manual';
 
+interface PublicRailStatusClient {
+  liveConfigured: boolean;
+  productionCredentialsFound?: boolean;
+  environment?: 'production' | 'sandbox';
+  tier?: 'production' | 'vendor_sandbox' | 'sandbox_fallback';
+  mode?: 'live_api' | 'sandbox';
+  endpointHost?: string;
+  missingCredentialKeys?: string[];
+  fallbackReason?: string;
+}
+
 interface GatewayServerConfig {
-  bkash: { liveConfigured: boolean };
-  nagad: { liveConfigured: boolean };
+  bkash: PublicRailStatusClient;
+  nagad: PublicRailStatusClient;
   sandboxAvailable: boolean;
 }
 
@@ -83,8 +94,18 @@ export function OnlineWalletCheckout({
   const [checkoutTab, setCheckoutTab] = useState<CheckoutTabMode>('gateway');
   const [selectedRail, setSelectedRail] = useState<PaymentMethod>(defaultMethod);
   const [gatewayConfig, setGatewayConfig] = useState<GatewayServerConfig>({
-    bkash: { liveConfigured: false },
-    nagad: { liveConfigured: false },
+    bkash: {
+      liveConfigured: false,
+      environment: 'sandbox',
+      tier: 'sandbox_fallback',
+      mode: 'sandbox',
+    },
+    nagad: {
+      liveConfigured: false,
+      environment: 'sandbox',
+      tier: 'sandbox_fallback',
+      mode: 'sandbox',
+    },
     sandboxAvailable: true,
   });
 
@@ -111,9 +132,9 @@ export function OnlineWalletCheckout({
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
 
   const isBkash = selectedRail === 'bKash';
-  const isLiveConfigured = isBkash
-    ? gatewayConfig.bkash.liveConfigured
-    : gatewayConfig.nagad.liveConfigured;
+  const activeRailStatus = isBkash ? gatewayConfig.bkash : gatewayConfig.nagad;
+  const isLiveConfigured = activeRailStatus.liveConfigured;
+  const isProductionTier = activeRailStatus.tier === 'production';
 
   const targetNumber = isBkash
     ? platformConfig?.bkashNumber || '01755-842190'
@@ -153,17 +174,34 @@ export function OnlineWalletCheckout({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const cb = parseGatewayCallbackParams(window.location.search);
-    if (!cb || cb.status === 'cancel' || cb.status === 'failure') return;
-    const gatewayPaymentId = cb.paymentID || cb.paymentRefId;
-    if (!gatewayPaymentId) return;
+    if (!cb) return;
+    if (cb.dealId && cb.dealId !== deal.id) return;
 
     const method: PaymentMethod = cb.method || selectedRail;
     setSelectedRail(method);
+
+    if (cb.status === 'cancel' || cb.status === 'failure') {
+      setGatewayError(
+        cb.status === 'cancel'
+          ? isBn
+            ? `${method} চেকআউট বাতিল করা হয়েছে। আপনি চাইলে পুনরায় চেষ্টা করতে পারেন।`
+            : `${method} checkout was cancelled before authorization. You can start a new session below.`
+          : isBn
+          ? `${method} পেমেন্ট ব্যর্থ হয়েছে। ব্যালেন্স ও তথ্য যাচাই করে আবার চেষ্টা করুন।`
+          : `${method} payment authorization failed. Please verify your wallet balance and try again.`
+      );
+      return;
+    }
+
+    const gatewayPaymentId = cb.paymentID || cb.paymentRefId;
+    if (!gatewayPaymentId) return;
+
     setVerifyingGateway(true);
     fetch('/api/payments/session/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        sessionId: cb.sessionId || activeSession?.id,
         dealId: deal.id,
         buyerId: userId,
         method,
@@ -474,7 +512,11 @@ export function OnlineWalletCheckout({
             </div>
             <div className="text-[11px] text-white/90">
               {escrowLabel} · {accountType} ·{' '}
-              {isLiveConfigured ? 'Live Merchant API' : 'Interactive Sandbox Mode'}
+              {isProductionTier
+                ? 'Production Merchant API'
+                : isLiveConfigured
+                ? 'Merchant Sandbox API'
+                : 'Sandbox Fallback'}
             </div>
           </div>
         </div>
@@ -561,24 +603,39 @@ export function OnlineWalletCheckout({
             <div className="p-4 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="font-bold text-slate-900 dark:text-white">
-                  {isLiveConfigured
-                    ? `Official ${selectedRail} Merchant API`
-                    : `${selectedRail} Merchant Sandbox Gateway`}
+                  {isProductionTier
+                    ? `Official ${selectedRail} Production API`
+                    : isLiveConfigured
+                    ? `Official ${selectedRail} Vendor Sandbox API`
+                    : `${selectedRail} Merchant Sandbox Fallback`}
                 </span>
                 <span className="font-mono text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                  {isLiveConfigured ? 'Live Connected' : 'Sandbox Active'}
+                  {isProductionTier
+                    ? 'Production Live'
+                    : isLiveConfigured
+                    ? 'Vendor Sandbox'
+                    : 'Sandbox Active'}
                 </span>
               </div>
 
               <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                 {isLiveConfigured
                   ? isBn
-                    ? `অফিশিয়াল ${selectedRail} চেকআউট সেশন তৈরি করে সরাসরি পেমেন্ট সম্পন্ন করুন।`
-                    : `Create a live ${selectedRail} Tokenized Checkout session and verify transaction status automatically.`
+                    ? `অফিশিয়াল ${selectedRail} চেকআউট সেশন (${activeRailStatus.endpointHost || 'Merchant API'}) তৈরি করে সরাসরি পেমেন্ট সম্পন্ন করুন।`
+                    : `Connected to ${selectedRail} Merchant API (${activeRailStatus.endpointHost || 'official endpoint'}). Create a tokenized checkout session and verify transaction status automatically.`
                   : isBn
-                  ? `লাইভ মার্চেন্ট API কী সেট না থাকায় ইন্টারেক্টিভ ${selectedRail} স্যান্ডবক্স গেটওয়ে চালু আছে — ওয়ালেট নম্বর, OTP (123456) ও পিন দিয়ে রিয়েল-টাইম পেমেন্ট যাচাই করুন।`
-                  : `Interactive ${selectedRail} sandbox gateway active (auto-upgrades when merchant API secrets are configured). Authorize with wallet number, OTP (123456), and PIN to attach a verified TrxID.`}
+                  ? `প্রোডাকশন মার্চেন্ট API ক্রেডেনশিয়াল সেট না থাকায় স্বয়ংক্রিয়ভাবে ${selectedRail} স্যান্ডবক্স এনভায়রনমেন্ট চালু হয়েছে — ওয়ালেট নম্বর, OTP (123456) ও পিন দিয়ে পেমেন্ট যাচাই করুন।`
+                  : `Production merchant credentials were not found, so the gateway automatically fell back to Sandbox mode. Authorize with wallet number, OTP (123456), and PIN to attach a verified TrxID.`}
               </p>
+
+              {!isLiveConfigured &&
+                activeRailStatus.missingCredentialKeys &&
+                activeRailStatus.missingCredentialKeys.length > 0 && (
+                  <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 break-words">
+                    Required server env for live {selectedRail}:{' '}
+                    {activeRailStatus.missingCredentialKeys.join(', ')}
+                  </div>
+                )}
 
               {activeSession && (
                 <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs space-y-1.5">

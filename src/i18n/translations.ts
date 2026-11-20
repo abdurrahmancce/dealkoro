@@ -140,6 +140,8 @@ export const translations = {
     noSearchTermsYet: 'No search terms recorded yet. Searches in Home & Search feeds appear here in real time.',
     deleteAccount: 'Delete Account Permanently',
     deleteAccountConfirmBtn: 'Verify & Delete My Account Forever',
+    revenueAnalytics: 'Revenue Analytics',
+    revenueAnalyticsSubtitle: 'Daily earnings from escrow fees over the last 30 days',
   },
   bn: {
     brand: 'DEALKORO',
@@ -280,6 +282,8 @@ export const translations = {
     noSearchTermsYet: 'এখনো কোনো সার্চ রেকর্ড হয়নি। হোম বা সার্চ ফিডে খুঁজলে এখানে রিয়েল-টাইমে দেখাবে।',
     deleteAccount: 'স্থায়ীভাবে অ্যাকাউন্ট ডিলিট করুন',
     deleteAccountConfirmBtn: 'ভেরিফাই করে অ্যাকাউন্ট স্থায়ীভাবে মুছুন',
+    revenueAnalytics: 'রেভিনিউ অ্যানালিটিক্স',
+    revenueAnalyticsSubtitle: 'গত ৩০ দিনের দৈনিক এস্ক্রো ফি আয়ের পরিসংখ্যান',
   },
 } as const;
 

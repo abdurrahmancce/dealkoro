@@ -5,6 +5,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { PaymentGatewaySession, PaymentMethod } from './src/types/dealkoro.ts';
+import {
+  getPublicGatewayConfigPayload,
+  normalizeIpv4,
+  resolveMerchantGatewayConfig,
+} from './src/utils/merchantGatewayConfig.ts';
+import {
+  createBkashLiveSession,
+  createNagadLiveSession,
+  executeBkashLivePayment,
+  verifyNagadLivePayment,
+} from './src/server/bkashNagadGateway.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,26 +28,6 @@ const IS_DEV =
 const MAX_BODY_BYTES = 64 * 1024;
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const sessionStore = new Map<string, PaymentGatewaySession>();
-
-interface GatewayEnvConfig {
-  bkashLive: boolean;
-  nagadLive: boolean;
-}
-
-function getGatewayEnvConfig(): GatewayEnvConfig {
-  const bkashLive = Boolean(
-    process.env.BKASH_APP_KEY &&
-      process.env.BKASH_APP_SECRET &&
-      process.env.BKASH_USERNAME &&
-      process.env.BKASH_PASSWORD
-  );
-  const nagadLive = Boolean(
-    process.env.NAGAD_MERCHANT_ID &&
-      process.env.NAGAD_PUBLIC_KEY &&
-      process.env.NAGAD_PRIVATE_KEY
-  );
-  return { bkashLive, nagadLive };
-}
 
 function sanitizeIdLocal(raw: string): string {
   const cleaned = raw.trim().replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 128);
@@ -87,6 +78,17 @@ function resolveSafeCallbackOrigin(raw: unknown): string {
   }
 }
 
+function extractClientIp(req: IncomingMessage): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  const raw =
+    typeof forwarded === 'string'
+      ? forwarded.split(',')[0].trim()
+      : Array.isArray(forwarded)
+      ? forwarded[0]
+      : req.socket.remoteAddress;
+  return normalizeIpv4(raw);
+}
+
 function sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
   const body = JSON.stringify(data);
   res.writeHead(statusCode, {
@@ -126,281 +128,14 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   });
 }
 
-async function createBkashLiveSession(params: {
-  dealId: string;
-  amount: number;
-  callbackUrl: string;
-}): Promise<{ paymentID: string; bkashURL: string }> {
-  const baseUrl = (
-    process.env.BKASH_BASE_URL ||
-    'https://tokenized.sandbox.bka.sh/v1.2.0-beta'
-  ).replace(/\/+$/, '');
-
-  const grantRes = await fetch(`${baseUrl}/tokenized/checkout/token/grant`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      username: process.env.BKASH_USERNAME || '',
-      password: process.env.BKASH_PASSWORD || '',
-    },
-    body: JSON.stringify({
-      app_key: process.env.BKASH_APP_KEY || '',
-      app_secret: process.env.BKASH_APP_SECRET || '',
-    }),
-  });
-  const grantData = (await grantRes.json()) as {
-    id_token?: string;
-    statusMessage?: string;
-  };
-  if (!grantRes.ok || !grantData.id_token) {
-    throw new Error(grantData.statusMessage || 'bKash token grant failed');
-  }
-
-  const createRes = await fetch(`${baseUrl}/tokenized/checkout/create`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: grantData.id_token,
-      'X-App-Key': process.env.BKASH_APP_KEY || '',
-    },
-    body: JSON.stringify({
-      mode: '0011',
-      payerReference: params.dealId,
-      callbackURL: params.callbackUrl,
-      amount: String(Math.round(params.amount)),
-      currency: 'BDT',
-      intent: 'sale',
-      merchantInvoiceNumber: `DK-${params.dealId.slice(-12)}-${Date.now().toString(36)}`,
-    }),
-  });
-  const createData = (await createRes.json()) as {
-    paymentID?: string;
-    bkashURL?: string;
-    statusMessage?: string;
-  };
-  if (!createRes.ok || !createData.paymentID || !createData.bkashURL) {
-    throw new Error(createData.statusMessage || 'bKash checkout create failed');
-  }
-  return { paymentID: createData.paymentID, bkashURL: createData.bkashURL };
-}
-
-async function executeBkashLivePayment(paymentID: string): Promise<{
-  trxID: string;
-  customerMsisdn?: string;
-}> {
-  const baseUrl = (
-    process.env.BKASH_BASE_URL ||
-    'https://tokenized.sandbox.bka.sh/v1.2.0-beta'
-  ).replace(/\/+$/, '');
-
-  const grantRes = await fetch(`${baseUrl}/tokenized/checkout/token/grant`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      username: process.env.BKASH_USERNAME || '',
-      password: process.env.BKASH_PASSWORD || '',
-    },
-    body: JSON.stringify({
-      app_key: process.env.BKASH_APP_KEY || '',
-      app_secret: process.env.BKASH_APP_SECRET || '',
-    }),
-  });
-  const grantData = (await grantRes.json()) as { id_token?: string; statusMessage?: string };
-  if (!grantRes.ok || !grantData.id_token) {
-    throw new Error(grantData.statusMessage || 'bKash token grant failed');
-  }
-
-  const execRes = await fetch(`${baseUrl}/tokenized/checkout/execute`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: grantData.id_token,
-      'X-App-Key': process.env.BKASH_APP_KEY || '',
-    },
-    body: JSON.stringify({ paymentID }),
-  });
-  const execData = (await execRes.json()) as {
-    trxID?: string;
-    transactionStatus?: string;
-    customerMsisdn?: string;
-    statusMessage?: string;
-  };
-  if (!execRes.ok || execData.transactionStatus !== 'Completed' || !execData.trxID) {
-    throw new Error(execData.statusMessage || 'bKash payment execution not completed');
-  }
-  return { trxID: execData.trxID, customerMsisdn: execData.customerMsisdn };
-}
-
-function formatPem(rawKey: string, label: 'PUBLIC KEY' | 'RSA PRIVATE KEY' | 'PRIVATE KEY'): string {
-  const normalized = rawKey.replace(/\\n/g, '\n').trim();
-  if (normalized.includes('-----BEGIN')) return normalized;
-  return `-----BEGIN ${label}-----\n${normalized}\n-----END ${label}-----`;
-}
-
-async function createNagadLiveSession(params: {
-  dealId: string;
-  amount: number;
-  callbackUrl: string;
-  clientIp: string;
-}): Promise<{ paymentRefId: string; redirectUrl: string }> {
-  const baseUrl = (
-    process.env.NAGAD_BASE_URL ||
-    'http://sandbox.mynagad.com:10080/remote-payment-gateway-1.0/api/dfs'
-  ).replace(/\/+$/, '');
-  const merchantId = process.env.NAGAD_MERCHANT_ID || '';
-  const publicKey = formatPem(process.env.NAGAD_PUBLIC_KEY || '', 'PUBLIC KEY');
-  const privateKey = formatPem(process.env.NAGAD_PRIVATE_KEY || '', 'PRIVATE KEY');
-
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const dateTime = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
-  const orderId = `DK${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-
-  const sensitiveData = JSON.stringify({
-    merchantId,
-    datetime: dateTime,
-    orderId,
-    challenge: crypto.randomBytes(16).toString('hex'),
-  });
-  const encryptedSensitive = crypto
-    .publicEncrypt(
-      { key: publicKey, padding: crypto.constants.RSA_PKCS1_PADDING },
-      Buffer.from(sensitiveData, 'utf8')
-    )
-    .toString('base64');
-  const sign = crypto.createSign('RSA-SHA256');
-  sign.update(sensitiveData, 'utf8');
-  const signature = sign.sign(privateKey, 'base64');
-
-  const initRes = await fetch(
-    `${baseUrl}/check-out/initialize/${merchantId}/${orderId}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-KM-Api-Version': 'v-0.2.0',
-        'X-KM-IP-V4': params.clientIp || '127.0.0.1',
-        'X-KM-Client-Type': 'PC_WEB',
-      },
-      body: JSON.stringify({
-        accountNumber: merchantId,
-        dateTime,
-        sensitiveData: encryptedSensitive,
-        signature,
-      }),
-    }
-  );
-  const initJson = (await initRes.json()) as {
-    sensitiveData?: string;
-    message?: string;
-  };
-  if (!initRes.ok || !initJson.sensitiveData) {
-    throw new Error(initJson.message || 'Nagad initialize handshake failed');
-  }
-
-  const decryptedInit = crypto
-    .privateDecrypt(
-      { key: privateKey, padding: crypto.constants.RSA_PKCS1_PADDING },
-      Buffer.from(initJson.sensitiveData, 'base64')
-    )
-    .toString('utf8');
-  const parsedInit = JSON.parse(decryptedInit) as {
-    paymentReferenceId: string;
-    challenge: string;
-  };
-
-  const confirmSensitive = JSON.stringify({
-    merchantId,
-    orderId,
-    currencyCode: '050',
-    amount: String(Math.round(params.amount)),
-    challenge: parsedInit.challenge,
-  });
-  const encryptedConfirm = crypto
-    .publicEncrypt(
-      { key: publicKey, padding: crypto.constants.RSA_PKCS1_PADDING },
-      Buffer.from(confirmSensitive, 'utf8')
-    )
-    .toString('base64');
-  const confirmSign = crypto.createSign('RSA-SHA256');
-  confirmSign.update(confirmSensitive, 'utf8');
-
-  const completeRes = await fetch(
-    `${baseUrl}/check-out/complete/${parsedInit.paymentReferenceId}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-KM-Api-Version': 'v-0.2.0',
-        'X-KM-IP-V4': params.clientIp || '127.0.0.1',
-        'X-KM-Client-Type': 'PC_WEB',
-      },
-      body: JSON.stringify({
-        sensitiveData: encryptedConfirm,
-        signature: confirmSign.sign(privateKey, 'base64'),
-        merchantCallbackURL: params.callbackUrl,
-        additionalMerchantInfo: { dealId: params.dealId },
-      }),
-    }
-  );
-  const completeJson = (await completeRes.json()) as {
-    callBackUrl?: string;
-    status?: string;
-    message?: string;
-  };
-  if (!completeRes.ok || completeJson.status !== 'Success' || !completeJson.callBackUrl) {
-    throw new Error(completeJson.message || 'Nagad checkout complete failed');
-  }
-
-  return {
-    paymentRefId: parsedInit.paymentReferenceId,
-    redirectUrl: completeJson.callBackUrl,
-  };
-}
-
-async function verifyNagadLivePayment(paymentRefId: string): Promise<{
-  trxID: string;
-  clientMobileNo?: string;
-}> {
-  const baseUrl = (
-    process.env.NAGAD_BASE_URL ||
-    'http://sandbox.mynagad.com:10080/remote-payment-gateway-1.0/api/dfs'
-  ).replace(/\/+$/, '');
-  const res = await fetch(`${baseUrl}/verify/payment/${paymentRefId}`, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-  });
-  const data = (await res.json()) as {
-    status?: string;
-    issuerPaymentRefNo?: string;
-    clientMobileNo?: string;
-    message?: string;
-  };
-  if (!res.ok || data.status !== 'Success' || !data.issuerPaymentRefNo) {
-    throw new Error(data.message || 'Nagad payment verification failed');
-  }
-  return {
-    trxID: data.issuerPaymentRefNo,
-    clientMobileNo: data.clientMobileNo,
-  };
-}
-
 async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlObj: URL): Promise<boolean> {
   if (!urlObj.pathname.startsWith('/api/payments')) {
     return false;
   }
 
   if (urlObj.pathname === '/api/payments/config' && req.method === 'GET') {
-    const cfg = getGatewayEnvConfig();
-    sendJson(res, 200, {
-      bkash: { liveConfigured: cfg.bkashLive },
-      nagad: { liveConfigured: cfg.nagadLive },
-      sandboxAvailable: true,
-    });
+    const resolved = resolveMerchantGatewayConfig(process.env);
+    sendJson(res, 200, getPublicGatewayConfigPayload(resolved));
     return true;
   }
 
@@ -435,19 +170,21 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
         return true;
       }
 
-      const envCfg = getGatewayEnvConfig();
+      const gatewayConfig = resolveMerchantGatewayConfig(process.env);
       const now = new Date();
       const stamp = now.getTime().toString(36).toUpperCase();
       const rand = crypto.randomBytes(2).toString('hex').toUpperCase();
       const sessionId = sanitizeIdLocal(`ps_${stamp}_${rand}`);
       const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
       const nowIso = now.toISOString();
+      const callbackUrl = `${callbackOrigin}/?gateway=${encodeURIComponent(method)}&dealId=${encodeURIComponent(dealId)}&sessionId=${encodeURIComponent(sessionId)}`;
 
-      if (method === 'bKash' && envCfg.bkashLive) {
-        const live = await createBkashLiveSession({
+      if (method === 'bKash' && gatewayConfig.bkash.mode === 'live_api') {
+        const live = await createBkashLiveSession(gatewayConfig.bkash, {
           dealId,
+          sessionId,
           amount,
-          callbackUrl: `${callbackOrigin}/?gateway=bKash&dealId=${encodeURIComponent(dealId)}`,
+          callbackUrl,
         });
         const session: PaymentGatewaySession = {
           id: sessionId,
@@ -464,19 +201,21 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
           updatedAt: nowIso,
         };
         sessionStore.set(session.id, session);
-        sendJson(res, 200, { session });
+        sendJson(res, 200, {
+          session,
+          environment: gatewayConfig.bkash.environment,
+          tier: gatewayConfig.bkash.tier,
+        });
         return true;
       }
 
-      if (method === 'Nagad' && envCfg.nagadLive) {
-        const clientIp =
-          (typeof req.headers['x-forwarded-for'] === 'string'
-            ? req.headers['x-forwarded-for'].split(',')[0].trim()
-            : req.socket.remoteAddress) || '127.0.0.1';
-        const live = await createNagadLiveSession({
+      if (method === 'Nagad' && gatewayConfig.nagad.mode === 'live_api') {
+        const clientIp = extractClientIp(req);
+        const live = await createNagadLiveSession(gatewayConfig.nagad, {
           dealId,
+          sessionId,
           amount,
-          callbackUrl: `${callbackOrigin}/?gateway=Nagad&dealId=${encodeURIComponent(dealId)}`,
+          callbackUrl,
           clientIp,
         });
         const session: PaymentGatewaySession = {
@@ -494,10 +233,15 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
           updatedAt: nowIso,
         };
         sessionStore.set(session.id, session);
-        sendJson(res, 200, { session });
+        sendJson(res, 200, {
+          session,
+          environment: gatewayConfig.nagad.environment,
+          tier: gatewayConfig.nagad.tier,
+        });
         return true;
       }
 
+      const activeRail = method === 'Nagad' ? gatewayConfig.nagad : gatewayConfig.bkash;
       const prefix = method === 'bKash' ? 'BKPGW' : 'NGPGW';
       const sandboxSession: PaymentGatewaySession = {
         id: sessionId,
@@ -513,7 +257,12 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
         updatedAt: nowIso,
       };
       sessionStore.set(sandboxSession.id, sandboxSession);
-      sendJson(res, 200, { session: sandboxSession });
+      sendJson(res, 200, {
+        session: sandboxSession,
+        environment: activeRail.environment,
+        tier: activeRail.tier,
+        fallbackReason: activeRail.fallbackReason,
+      });
       return true;
     } catch (err) {
       sendJson(res, 400, {
@@ -531,7 +280,7 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
       const requestedBuyerId = body.buyerId ? sanitizeIdLocal(String(body.buyerId)) : '';
       const method: PaymentMethod = body.method === 'Nagad' ? 'Nagad' : 'bKash';
       const existing = sessionStore.get(sessionId);
-      const envCfg = getGatewayEnvConfig();
+      const gatewayConfig = resolveMerchantGatewayConfig(process.env);
 
       if (existing) {
         if (requestedBuyerId && existing.buyerId !== requestedBuyerId) {
@@ -562,29 +311,43 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
         body.gatewayPaymentId || existing?.gatewayPaymentId || ''
       ).trim();
 
-      if (
-        (existing?.mode === 'live_api' || (!existing && ((method === 'bKash' && envCfg.bkashLive) || (method === 'Nagad' && envCfg.nagadLive)))) &&
-        gatewayPaymentId
-      ) {
+      const expectedAmount = existing?.amount || Math.max(0, Math.round(Number(body.amount || 0)));
+      const shouldVerifyLive =
+        Boolean(gatewayPaymentId) &&
+        (existing?.mode === 'live_api' ||
+          (!existing &&
+            ((method === 'bKash' && gatewayConfig.bkash.mode === 'live_api') ||
+              (method === 'Nagad' && gatewayConfig.nagad.mode === 'live_api'))));
+
+      if (shouldVerifyLive) {
         const result =
           method === 'bKash'
-            ? await executeBkashLivePayment(gatewayPaymentId)
-            : await verifyNagadLivePayment(gatewayPaymentId);
+            ? await executeBkashLivePayment(gatewayConfig.bkash, {
+                paymentID: gatewayPaymentId,
+                expectedAmount: expectedAmount > 0 ? expectedAmount : undefined,
+              })
+            : await verifyNagadLivePayment(gatewayConfig.nagad, {
+                paymentRefId: gatewayPaymentId,
+                expectedAmount: expectedAmount > 0 ? expectedAmount : undefined,
+                clientIp: extractClientIp(req),
+              });
         const nowIso = new Date().toISOString();
         const updated: PaymentGatewaySession = {
           id: existing?.id || sessionId,
           dealId: existing?.dealId || sanitizeIdLocal(String(body.dealId || 'deal')),
           buyerId: existing?.buyerId || sanitizeIdLocal(String(body.buyerId || 'buyer')),
           method,
-          amount: existing?.amount || Math.max(1, Math.round(Number(body.amount || 0))),
+          amount: existing?.amount || Math.max(1, expectedAmount),
           mode: 'live_api',
           status: 'verified',
           gatewayPaymentId,
           trxId: result.trxID,
           senderMasked:
-            result.customerMsisdn ||
-            (result as { clientMobileNo?: string }).clientMobileNo ||
-            'Verified Wallet',
+            ('customerMsisdn' in result
+              ? result.customerMsisdn
+              : 'clientMobileNo' in result
+              ? result.clientMobileNo
+              : undefined) || 'Verified Wallet',
           expiresAt: existing?.expiresAt || new Date(Date.now() + SESSION_TTL_MS).toISOString(),
           createdAt: existing?.createdAt || nowIso,
           updatedAt: nowIso,
@@ -627,7 +390,7 @@ async function handlePaymentApi(req: IncomingMessage, res: ServerResponse, urlOb
         dealId: existing?.dealId || sanitizeIdLocal(String(body.dealId || 'deal')),
         buyerId: existing?.buyerId || sanitizeIdLocal(String(body.buyerId || 'buyer')),
         method,
-        amount: existing?.amount || Math.max(1, Math.round(Number(body.amount || 0))),
+        amount: existing?.amount || Math.max(1, expectedAmount),
         mode: 'sandbox',
         status: 'verified',
         gatewayPaymentId: gatewayPaymentId || `${prefix}PGW_${Date.now().toString(36).toUpperCase()}`,

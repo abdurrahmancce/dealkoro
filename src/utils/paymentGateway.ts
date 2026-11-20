@@ -161,18 +161,26 @@ export function parseGatewayCallbackParams(search: string): {
   paymentID?: string;
   status?: string;
   paymentRefId?: string;
+  sessionId?: string;
+  dealId?: string;
   method?: PaymentMethod;
 } | null {
   if (!search) return null;
   const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
   const paymentID = params.get('paymentID') || params.get('payment_id') || undefined;
-  const paymentRefId = params.get('payment_ref_id') || undefined;
+  const paymentRefId = params.get('payment_ref_id') || params.get('paymentRefId') || undefined;
+  const sessionId = params.get('sessionId') || params.get('session_id') || undefined;
+  const dealId = params.get('dealId') || undefined;
   const status = params.get('status') || undefined;
   const gwMethod = params.get('gateway');
-  if (!paymentID && !paymentRefId) return null;
+  if (!paymentID && !paymentRefId && !(gwMethod && status)) return null;
   const method: PaymentMethod | undefined =
-    gwMethod === 'Nagad' || paymentRefId ? 'Nagad' : gwMethod === 'bKash' || paymentID ? 'bKash' : undefined;
-  return { paymentID, paymentRefId, status, method };
+    gwMethod === 'Nagad' || paymentRefId
+      ? 'Nagad'
+      : gwMethod === 'bKash' || paymentID
+      ? 'bKash'
+      : undefined;
+  return { paymentID, paymentRefId, sessionId, dealId, status, method };
 }
 
 /**

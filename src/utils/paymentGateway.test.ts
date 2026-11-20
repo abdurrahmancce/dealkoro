@@ -103,12 +103,19 @@ test('createSandboxSessionPayload & verifySandboxPaymentPayload handle real-time
 });
 
 test('parseGatewayCallbackParams extracts bKash and Nagad callback tokens', () => {
-  const bkashCb = parseGatewayCallbackParams('?paymentID=TR00112233&status=success&gateway=bKash');
+  const bkashCb = parseGatewayCallbackParams(
+    '?paymentID=TR00112233&status=success&gateway=bKash&dealId=deal_99&sessionId=ps_99'
+  );
   assert.deepEqual(bkashCb, {
     paymentID: 'TR00112233',
     paymentRefId: undefined,
+    sessionId: 'ps_99',
+    dealId: 'deal_99',
     status: 'success',
     method: 'bKash',
   });
+  const cancelCb = parseGatewayCallbackParams('?gateway=Nagad&status=cancel&dealId=deal_99');
+  assert.equal(cancelCb?.method, 'Nagad');
+  assert.equal(cancelCb?.status, 'cancel');
   assert.equal(parseGatewayCallbackParams('?foo=bar'), null);
 });

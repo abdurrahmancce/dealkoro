@@ -49,6 +49,7 @@ import {
   sanitizePlatformConfig,
 } from '../utils/payloadSanitizer';
 import { CategoryRevenueChart } from './CategoryRevenueChart';
+import { RevenueAnalyticsSection } from './RevenueAnalyticsSection';
 import { SearchTermAnalysisCard } from './SearchTermAnalysisCard';
 import { ResilientImage } from './ResilientImage';
 
@@ -410,9 +411,14 @@ export function AdminDashboard({
         </div>
       </div>
 
-      {/* Category Escrow Fee Income Breakdown & Search Term Analysis */}
+      {/* Revenue Analytics, Category Escrow Fee Breakdown & Search Term Analysis */}
       {activeTab === 'overview' && (
         <>
+          <RevenueAnalyticsSection
+            statements={statements}
+            language={language}
+            theme={theme}
+          />
           <CategoryRevenueChart
             deals={deals}
             listings={listings}

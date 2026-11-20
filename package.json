@@ -9,7 +9,7 @@
     "preview": "vite preview --port=3000 --host=0.0.0.0",
     "start": "node server.ts",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/dealMath.test.ts src/utils/adminMetrics.test.ts src/utils/payloadSanitizer.test.ts src/utils/priceTrends.test.ts src/utils/paymentGateway.test.ts"
+    "test": "tsx --test src/utils/dealMath.test.ts src/utils/adminMetrics.test.ts src/utils/payloadSanitizer.test.ts src/utils/priceTrends.test.ts src/utils/paymentGateway.test.ts src/utils/merchantGatewayConfig.test.ts"
   },
   "dependencies": {
     "firebase": "^11.6.0",

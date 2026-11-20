@@ -93,14 +93,29 @@ export default defineConfig(() => {
         name: 'disable-vite-hmr-websocket',
         apply: 'serve',
         configureServer(server) {
+          server.middlewares.use('/@vite-plugin-pwa/pwa-entry-point-loaded', (_req, res) => {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.end('export default function registerDevSW() {}\n');
+          });
           server.middlewares.use('/@vite/client', async (_req, res, next) => {
             try {
               const result = await server.transformRequest('/@vite/client');
               if (!result) return next();
-              const patched = result.code.replace(
-                'transport.connect(createHMRHandler(handleMessage));',
-                '/* HMR WebSocket disabled */'
-              );
+              const patched = result.code
+                .replace(
+                  'transport.connect(createHMRHandler(handleMessage));',
+                  '/* HMR WebSocket disabled */'
+                )
+                .replace(
+                  /throw new Error\(["']send was called before connect["']\)/g,
+                  'return'
+                )
+                .replace(
+                  /throw new Error\(["']invoke was called before connect["']\)/g,
+                  'return'
+                );
               res.statusCode = 200;
               res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
               res.setHeader('Cache-Control', 'no-cache');

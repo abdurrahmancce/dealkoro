@@ -586,13 +586,20 @@ export async function purgeLegacySeedDataForMainAdmin(user: UserProfile): Promis
 export function subscribeFirebaseAdmins(
   onUpdate: (items: AdminAgent[]) => void
 ): Unsubscribe {
+  if (!auth.currentUser) {
+    return () => {};
+  }
   const rankRole = (role?: StaffRole): number => {
     if (role === 'main_admin') return 0;
     if (role === 'sub_admin') return 1;
     return 2;
   };
-  return onSnapshot(
+  const adminsQuery = query(
     collection(db, 'admins'),
+    where('verified', 'in', [true, false])
+  );
+  return onSnapshot(
+    adminsQuery,
     (snapshot) => {
       const items: AdminAgent[] = snapshot.docs
         .map((d) => {
@@ -2026,11 +2033,18 @@ export async function deleteCurrentUserAccountCompletely(): Promise<{
 
     // 3. Delete all owned listings and their comment subcollections
     const listingsSnap = await getDocs(
-      query(collection(db, 'listings'), where('sellerId', '==', uid))
+      query(
+        collection(db, 'listings'),
+        where('sellerId', '==', uid),
+        where('status', 'in', ['active', 'in_deal', 'sold'])
+      )
     );
     for (const listingDoc of listingsSnap.docs) {
       const commentsSnap = await getDocs(
-        collection(db, 'listings', listingDoc.id, 'comments')
+        query(
+          collection(db, 'listings', listingDoc.id, 'comments'),
+          where('listingId', '==', listingDoc.id)
+        )
       );
       await Promise.all(commentsSnap.docs.map((c) => deleteDoc(c.ref).catch(() => {})));
       await deleteDoc(listingDoc.ref).catch(() => {});

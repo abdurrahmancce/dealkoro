@@ -488,7 +488,7 @@ service cloud.firestore {
     // Aggregated marketplace search term analytics
     match /searchTerms/{termId} {
       allow get: if isValidId(termId) && isSignedIn();
-      allow list: if isBootstrapAdmin() || (isSignedIn() && resource.data.searchCount >= 1 && resource.data.normalizedTerm is string);
+      allow list: if isBootstrapAdmin() || (isSignedIn() && resource.data.searchCount >= 1);
       allow create: if isValidId(termId)
         && isVerifiedUser()
         && isValidSearchTerm(incoming(), termId)
