@@ -51,7 +51,7 @@ function maskBdPhoneLocal(raw: string): string {
 const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
 };
 
 function pruneExpiredSessions(): void {
@@ -474,6 +474,12 @@ async function startServer(): Promise<void> {
   const server = http.createServer(async (req, res) => {
     try {
       const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      if (urlObj.pathname === '/api/maps/config' && req.method === 'GET') {
+        const apiKey =
+          process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
+        sendJson(res, 200, { configured: Boolean(apiKey), apiKey });
+        return;
+      }
       const handledApi = await handlePaymentApi(req, res, urlObj);
       if (handledApi) return;
 

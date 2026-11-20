@@ -7,6 +7,7 @@ import {
   computeAdminDashboardMetrics,
   computeCategoryFeeBreakdown,
   computeDailyAdminFeeTrend,
+  computeRevenueAnalytics,
   createDateRangePreset,
   isActiveDeal,
   isPendingPayoutDeal,
@@ -439,4 +440,60 @@ test('compute30DayRevenueAnalytics computes 30-day cumulative series, average, a
   assert.equal(empty.summary.totalFeeIncome, 0);
   assert.equal(empty.summary.activeDays, 0);
   assert.equal(empty.summary.peakDay, null);
+});
+
+test('computeRevenueAnalytics supports flexible 7d, 90d, and custom date ranges', () => {
+  const ref = new Date('2026-11-18T12:00:00Z');
+  const statements: StatementEntry[] = [
+    ...TEST_STATEMENTS, // 2026-11-16: 70
+    {
+      id: 'stmt_oct_early',
+      userId: 'admin_abdur',
+      dealId: 'deal_old_oct',
+      title: 'Escrow Fee Income: Legacy Deal',
+      type: 'admin_fee_income',
+      amount: 120,
+      feeAmount: 0,
+      netAmount: 120,
+      method: 'bKash',
+      createdAt: '2026-09-25T10:00:00Z',
+    },
+    {
+      id: 'stmt_nov18_fee',
+      userId: 'admin_abdur',
+      dealId: 'deal_2000_active',
+      title: 'Escrow Fee Income: Ronaldo Squad',
+      type: 'admin_fee_income',
+      amount: 110,
+      feeAmount: 0,
+      netAmount: 110,
+      method: 'Nagad',
+      createdAt: '2026-11-18T09:00:00Z',
+    },
+  ];
+
+  const r7 = createDateRangePreset('7d', statements, TEST_DEALS, ref);
+  const analytics7d = computeRevenueAnalytics(statements, r7, ref);
+  assert.equal(analytics7d.points.length, 7);
+  assert.equal(analytics7d.summary.dayCount, 7);
+  assert.equal(analytics7d.summary.totalFeeIncome, 180);
+  assert.equal(analytics7d.summary.dailyAverage, Math.round(180 / 7));
+
+  const r90 = createDateRangePreset('90d', statements, TEST_DEALS, ref);
+  const analytics90d = computeRevenueAnalytics(statements, r90, ref);
+  assert.equal(analytics90d.points.length, 90);
+  assert.equal(analytics90d.summary.dayCount, 90);
+  assert.equal(analytics90d.summary.totalFeeIncome, 300);
+  assert.equal(analytics90d.summary.activeDays, 3);
+  assert.equal(analytics90d.summary.peakDay?.dateKey, '2026-09-25');
+
+  const custom = computeRevenueAnalytics(
+    statements,
+    { startDate: '2026-11-17', endDate: '2026-11-18' },
+    ref
+  );
+  assert.equal(custom.points.length, 2);
+  assert.equal(custom.summary.totalFeeIncome, 110);
+  assert.equal(custom.points[0].cumulativeFee, 0);
+  assert.equal(custom.points[1].cumulativeFee, 110);
 });

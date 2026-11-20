@@ -12,6 +12,8 @@
     "test": "tsx --test src/utils/dealMath.test.ts src/utils/adminMetrics.test.ts src/utils/payloadSanitizer.test.ts src/utils/priceTrends.test.ts src/utils/paymentGateway.test.ts src/utils/merchantGatewayConfig.test.ts"
   },
   "dependencies": {
+    "@types/google.maps": "^3.67.0",
+    "@vis.gl/react-google-maps": "^1.10.2",
     "firebase": "^11.6.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",

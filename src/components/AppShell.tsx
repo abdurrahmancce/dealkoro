@@ -4,10 +4,12 @@ import {
   Bell,
   Bookmark,
   FileText,
+  Gamepad2,
   HelpCircle,
   Home,
   LayoutDashboard,
   LogOut,
+  MapPin,
   Menu,
   MessageSquare,
   Moon,
@@ -100,6 +102,18 @@ export function AppShell({
           },
         ]
       : []),
+    {
+      label: t(language, 'escrowMap'),
+      icon: <MapPin className="w-4 h-4" />,
+      action: () => onNavigate({ screen: 'escrow_map' }),
+      active: route.screen === 'escrow_map',
+    },
+    {
+      label: t(language, 'strikerGame'),
+      icon: <Gamepad2 className="w-4 h-4" />,
+      action: () => onNavigate({ screen: 'arcade_game' }),
+      active: route.screen === 'arcade_game',
+    },
     {
       label: t(language, 'statement'),
       icon: <FileText className="w-4 h-4" />,

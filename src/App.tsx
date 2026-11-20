@@ -92,6 +92,8 @@ import { InboxScreen } from './components/InboxScreen';
 import { ChatScreen } from './components/ChatScreen';
 import { DealRoomScreen } from './components/DealRoomScreen';
 import { TeamVerificationBanner } from './components/TeamVerificationBanner';
+import { EscrowMapScreen } from './components/EscrowMapScreen';
+import { StrikerGameScreen } from './components/StrikerGameScreen';
 import { t } from './i18n/translations';
 
 export default function App() {
@@ -108,8 +110,15 @@ export default function App() {
   const [teamInvites, setTeamInvites] = useState<TeamVerificationInvite[]>([]);
   const [dealPaymentSessions, setDealPaymentSessions] = useState<PaymentGatewaySession[]>([]);
   const [searchTerms, setSearchTerms] = useState<SearchTermStat[]>([]);
+  const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState(false);
 
   const currentRoute = routeStack[routeStack.length - 1];
+
+  useEffect(() => {
+    const onQuotaExceeded = () => setGmpQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
+  }, []);
 
   useEffect(() => {
     saveLocalPreferences(state.language, state.bookmarks);
@@ -334,6 +343,7 @@ export default function App() {
         'admin_queue',
         'admin_dashboard',
         'inbox',
+        'escrow_map',
       ];
       if (topLevel.includes(next.screen)) {
         return [next];
@@ -1216,28 +1226,62 @@ export default function App() {
   if (currentRoute.screen === 'admin_dashboard') {
     headerTitle = t(state.language, 'adminDashboard');
   }
+  if (currentRoute.screen === 'escrow_map') {
+    headerTitle = t(state.language, 'escrowMap');
+  }
   if (currentRoute.screen === 'deal') {
     const d = state.deals.find((item) => item.id === currentRoute.dealId);
     headerTitle = d?.title;
   }
 
+  const gmpQuotaBanner = gmpQuotaExceeded ? (
+    <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+      <span>
+        Google Maps Platform quota reached. If you are the app owner, visit{' '}
+        <a
+          href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline font-semibold text-amber-950 hover:text-amber-800"
+        >
+          maps developer site
+        </a>{' '}
+        for instructions to update your account.
+      </span>
+    </div>
+  ) : null;
+
+  if (currentRoute.screen === 'arcade_game') {
+    return (
+      <>
+        {gmpQuotaBanner}
+        <StrikerGameScreen
+          language={state.language}
+          onExit={() => navigateTo({ screen: 'home' })}
+        />
+      </>
+    );
+  }
+
   return (
-    <AppShell
-      user={user}
-      language={state.language}
-      theme={theme}
-      route={currentRoute}
-      unreadNotifications={unreadNotifications}
-      unreadMessages={unreadMessages}
-      drawerOpen={drawerOpen}
-      onToggleTheme={handleToggleTheme}
-      onOpenDrawer={() => setDrawerOpen(true)}
-      onCloseDrawer={() => setDrawerOpen(false)}
-      onNavigate={navigateTo}
-      onLogout={() => void handleLogout()}
-      onBack={showBack ? goBack : undefined}
-      headerTitle={headerTitle}
-    >
+    <>
+      {gmpQuotaBanner}
+      <AppShell
+        user={user}
+        language={state.language}
+        theme={theme}
+        route={currentRoute}
+        unreadNotifications={unreadNotifications}
+        unreadMessages={unreadMessages}
+        drawerOpen={drawerOpen}
+        onToggleTheme={handleToggleTheme}
+        onOpenDrawer={() => setDrawerOpen(true)}
+        onCloseDrawer={() => setDrawerOpen(false)}
+        onNavigate={navigateTo}
+        onLogout={() => void handleLogout()}
+        onBack={showBack ? goBack : undefined}
+        headerTitle={headerTitle}
+      >
       {syncNotice && (
         <div
           role="alert"
@@ -1534,6 +1578,10 @@ export default function App() {
           />
         );
       })()}
+      {currentRoute.screen === 'escrow_map' && (
+        <EscrowMapScreen language={state.language} theme={theme} />
+      )}
     </AppShell>
+    </>
   );
 }

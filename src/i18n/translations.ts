@@ -141,7 +141,9 @@ export const translations = {
     deleteAccount: 'Delete Account Permanently',
     deleteAccountConfirmBtn: 'Verify & Delete My Account Forever',
     revenueAnalytics: 'Revenue Analytics',
-    revenueAnalyticsSubtitle: 'Daily earnings from escrow fees over the last 30 days',
+    revenueAnalyticsSubtitle: 'Daily earnings from escrow fees across flexible date ranges',
+    escrowMap: 'Escrow Meetup Map',
+    strikerGame: 'Striker Arena',
   },
   bn: {
     brand: 'DEALKORO',
@@ -283,7 +285,9 @@ export const translations = {
     deleteAccount: 'স্থায়ীভাবে অ্যাকাউন্ট ডিলিট করুন',
     deleteAccountConfirmBtn: 'ভেরিফাই করে অ্যাকাউন্ট স্থায়ীভাবে মুছুন',
     revenueAnalytics: 'রেভিনিউ অ্যানালিটিক্স',
-    revenueAnalyticsSubtitle: 'গত ৩০ দিনের দৈনিক এস্ক্রো ফি আয়ের পরিসংখ্যান',
+    revenueAnalyticsSubtitle: 'নির্বাচিত সময়সীমা অনুযায়ী দৈনিক এস্ক্রো ফি আয়ের পরিসংখ্যান',
+    escrowMap: 'এস্ক্রো মিটআপ ম্যাপ',
+    strikerGame: 'স্ট্রাইকার গেম',
   },
 } as const;
 

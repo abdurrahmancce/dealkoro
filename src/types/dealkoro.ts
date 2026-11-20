@@ -291,4 +291,6 @@ export type AppRoute =
   | { screen: 'admin_detail'; adminId: string }
   | { screen: 'inbox' }
   | { screen: 'chat'; conversationId: string }
-  | { screen: 'deal'; dealId: string };
+  | { screen: 'deal'; dealId: string }
+  | { screen: 'escrow_map' }
+  | { screen: 'arcade_game' };

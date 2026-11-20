@@ -416,6 +416,7 @@ export function AdminDashboard({
         <>
           <RevenueAnalyticsSection
             statements={statements}
+            deals={deals}
             language={language}
             theme={theme}
           />

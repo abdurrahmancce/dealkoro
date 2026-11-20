@@ -9,25 +9,46 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { TrendingUp } from 'lucide-react';
-import type { Language, StatementEntry, ThemeMode } from '../types/dealkoro';
+import { Calendar, RotateCcw, TrendingUp } from 'lucide-react';
+import type {
+  AdminDeal,
+  DateRangePreset,
+  Language,
+  StatementEntry,
+  ThemeMode,
+} from '../types/dealkoro';
 import { t } from '../i18n/translations';
 import {
-  compute30DayRevenueAnalytics,
-  type ThirtyDayRevenuePoint,
+  computeRevenueAnalytics,
+  createDateRangePreset,
+  validateDateRange,
+  type RevenueAnalyticsPoint,
 } from '../utils/adminMetrics';
 import { formatTk } from '../utils/dealMath';
 
 interface RevenueAnalyticsSectionProps {
   statements: StatementEntry[];
+  deals?: AdminDeal[];
   language: Language;
   theme: ThemeMode;
 }
 
 type RevenueChartView = 'daily' | 'cumulative';
 
+const RANGE_PRESETS: {
+  id: Exclude<DateRangePreset, 'custom'>;
+  labelEn: string;
+  labelBn: string;
+}[] = [
+  { id: '7d', labelEn: '7D', labelBn: '৭ দিন' },
+  { id: '30d', labelEn: '30D', labelBn: '৩০ দিন' },
+  { id: '90d', labelEn: '90D', labelBn: '৯০ দিন' },
+  { id: 'all', labelEn: 'All', labelBn: 'সর্বমোট' },
+];
+
 export function RevenueAnalyticsSection({
   statements,
+  deals = [],
   language,
   theme,
 }: RevenueAnalyticsSectionProps) {
@@ -36,9 +57,39 @@ export function RevenueAnalyticsSection({
   const [chartView, setChartView] = useState<RevenueChartView>('daily');
   const gradientId = useId().replace(/:/g, '');
 
+  const initial30d = useMemo(
+    () => createDateRangePreset('30d', statements, deals),
+    // Initialize default 30-day UTC window once; preset buttons recalculate on demand
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  const [preset, setPreset] = useState<DateRangePreset>('30d');
+  const [startDate, setStartDate] = useState<string>(initial30d.startDate);
+  const [endDate, setEndDate] = useState<string>(initial30d.endDate);
+
+  const rangeCheck = useMemo(
+    () => validateDateRange(startDate, endDate),
+    [startDate, endDate]
+  );
+
+  const activeStart = rangeCheck.valid ? rangeCheck.startDate : initial30d.startDate;
+  const activeEnd = rangeCheck.valid ? rangeCheck.endDate : initial30d.endDate;
+
+  const handleSelectPreset = (nextPreset: Exclude<DateRangePreset, 'custom'>) => {
+    const computed = createDateRangePreset(nextPreset, statements, deals);
+    setPreset(nextPreset);
+    setStartDate(computed.startDate);
+    setEndDate(computed.endDate);
+  };
+
   const { points, summary } = useMemo(
-    () => compute30DayRevenueAnalytics(statements),
-    [statements]
+    () =>
+      computeRevenueAnalytics(statements, {
+        startDate: activeStart,
+        endDate: activeEnd,
+      }),
+    [statements, activeStart, activeEnd]
   );
 
   const strokeColor = isDark ? '#34D399' : '#059669';
@@ -47,69 +98,153 @@ export function RevenueAnalyticsSection({
   const avgLineColor = isDark ? '#64748B' : '#94A3B8';
 
   const activeDataKey = chartView === 'cumulative' ? 'cumulativeFee' : 'releasedFee';
+  const periodDays = summary.dayCount;
 
   return (
     <section
       aria-label="Revenue Analytics"
       className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-5 transition-colors"
     >
-      {/* Header & View Switcher */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <h2 className="text-base font-bold tracking-tight text-slate-900 dark:text-white">
-              {t(language, 'revenueAnalytics')}
-            </h2>
+      {/* Header, Chart View Switcher & Date-Range Picker */}
+      <div className="flex flex-col gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <h2 className="text-base font-bold tracking-tight text-slate-900 dark:text-white">
+                {t(language, 'revenueAnalytics')}
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {t(language, 'revenueAnalyticsSubtitle')}
+              {summary.startDate && summary.endDate ? (
+                <span className="font-mono tabular-nums">
+                  {' '}
+                  · {summary.startDate} → {summary.endDate} ({periodDays}d)
+                </span>
+              ) : null}
+            </p>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {t(language, 'revenueAnalyticsSubtitle')}
-            {summary.startDate && summary.endDate ? (
-              <span className="font-mono tabular-nums">
-                {' '}
-                · {summary.startDate} → {summary.endDate}
-              </span>
-            ) : null}
-          </p>
+
+          <div
+            className="inline-flex items-center self-start md:self-auto p-1 bg-slate-100 dark:bg-slate-800 rounded-xl"
+            role="group"
+            aria-label="Revenue chart display mode"
+          >
+            <button
+              type="button"
+              onClick={() => setChartView('daily')}
+              aria-pressed={chartView === 'daily'}
+              className={`min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 transition-colors ${
+                chartView === 'daily'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {isBn ? 'দৈনিক আয়' : 'Daily Earnings'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartView('cumulative')}
+              aria-pressed={chartView === 'cumulative'}
+              className={`min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 transition-colors ${
+                chartView === 'cumulative'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {isBn ? `ক্রমবর্ধমান (${periodDays} দিন)` : `Cumulative ${periodDays}D`}
+            </button>
+          </div>
         </div>
 
-        <div
-          className="inline-flex items-center self-start md:self-auto p-1 bg-slate-100 dark:bg-slate-800 rounded-xl"
-          role="group"
-          aria-label="Revenue chart display mode"
-        >
-          <button
-            type="button"
-            onClick={() => setChartView('daily')}
-            aria-pressed={chartView === 'daily'}
-            className={`min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 transition-colors ${
-              chartView === 'daily'
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            {isBn ? 'দৈনিক আয়' : 'Daily Earnings'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setChartView('cumulative')}
-            aria-pressed={chartView === 'cumulative'}
-            className={`min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 transition-colors ${
-              chartView === 'cumulative'
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            {isBn ? 'মোট ক্রমবর্ধমান' : 'Cumulative 30D'}
-          </button>
+        {/* Flexible Date-Range Picker Toolbar */}
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl"
+              role="group"
+              aria-label="Revenue analytics date range presets"
+            >
+              {RANGE_PRESETS.map((p) => {
+                const active = preset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(p.id)}
+                    aria-pressed={active}
+                    className={`min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 transition-colors ${
+                      active
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {isBn ? p.labelBn : p.labelEn}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span className="font-semibold">{isBn ? 'শুরু:' : 'From'}</span>
+              <input
+                type="date"
+                aria-label="Revenue analytics start date"
+                value={startDate}
+                onChange={(e) => {
+                  setPreset('custom');
+                  setStartDate(e.target.value);
+                }}
+                className="min-h-[38px] px-2.5 py-1 text-xs font-mono tabular-nums bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+              />
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <span className="font-semibold">{isBn ? 'শেষ:' : 'To'}</span>
+              <input
+                type="date"
+                aria-label="Revenue analytics end date"
+                value={endDate}
+                onChange={(e) => {
+                  setPreset('custom');
+                  setEndDate(e.target.value);
+                }}
+                className="min-h-[38px] px-2.5 py-1 text-xs font-mono tabular-nums bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl"
+              />
+            </label>
+
+            {preset !== '30d' && (
+              <button
+                type="button"
+                onClick={() => handleSelectPreset('30d')}
+                className="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>{isBn ? 'রিসেট (৩০ দিন)' : 'Reset 30D'}</span>
+              </button>
+            )}
+          </div>
         </div>
+
+        {!rangeCheck.valid && rangeCheck.error && (
+          <div
+            role="alert"
+            className="px-3 py-2 text-xs font-medium text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl"
+          >
+            {rangeCheck.error} Showing default 30D window until corrected.
+          </div>
+        )}
       </div>
 
-      {/* 30-Day Summary Strip (Single-Elevation Hairline Grid) */}
+      {/* Period Summary Strip (Single-Elevation Hairline Grid) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
         <div className="space-y-0.5">
           <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            {isBn ? '৩০ দিনের এস্ক্রো আয়' : '30-Day Escrow Earnings'}
+            {isBn ? `${periodDays} দিনের এস্ক্রো আয়` : `${periodDays}-Day Escrow Earnings`}
           </div>
           <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-400 tabular-nums">
             {formatTk(summary.totalFeeIncome)}
@@ -122,13 +257,15 @@ export function RevenueAnalyticsSection({
 
         <div className="space-y-0.5">
           <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            {isBn ? 'দৈনিক গড় আয়' : 'Daily Average (30D)'}
+            {isBn ? `দৈনিক গড় আয় (${periodDays} দিন)` : `Daily Average (${periodDays}D)`}
           </div>
           <div className="text-lg font-extrabold text-slate-900 dark:text-white tabular-nums">
             {formatTk(summary.dailyAverage)}
           </div>
           <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-            {isBn ? 'প্রতিদিনের গড় হার' : 'Per day across 30 days'}
+            {isBn
+              ? `${periodDays} দিনের গড় হার`
+              : `Per day across ${periodDays} day${periodDays === 1 ? '' : 's'}`}
           </div>
         </div>
 
@@ -137,7 +274,7 @@ export function RevenueAnalyticsSection({
             {isBn ? 'সক্রিয় আয়ের দিন' : 'Active Earning Days'}
           </div>
           <div className="text-lg font-extrabold text-slate-900 dark:text-white tabular-nums">
-            {summary.activeDays} / {points.length || 30}
+            {summary.activeDays} / {periodDays}
           </div>
           <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
             {isBn ? 'ফি সংগ্রহ হয়েছে' : 'Days with fee income'}
@@ -157,14 +294,14 @@ export function RevenueAnalyticsSection({
                   isBn ? 'ডিল' : 'deal(s)'
                 }`
               : isBn
-              ? 'এখনো কোনো আয় নেই'
-              : 'No settlements yet'}
+              ? 'এই সময়সীমায় আয় নেই'
+              : 'No settlements in range'}
           </div>
         </div>
       </div>
 
-      {/* Recharts 30-Day Daily Escrow Fee Visualization */}
-      <div className="w-full h-64" data-testid="revenue-analytics-30d-chart">
+      {/* Recharts Daily / Cumulative Escrow Fee Visualization */}
+      <div className="w-full h-64" data-testid="revenue-analytics-chart">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={points}
@@ -210,7 +347,7 @@ export function RevenueAnalyticsSection({
             <Tooltip
               content={({ active, payload }) => {
                 if (!active || !payload || payload.length === 0) return null;
-                const pt = payload[0].payload as ThirtyDayRevenuePoint;
+                const pt = payload[0].payload as RevenueAnalyticsPoint;
                 return (
                   <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2.5 shadow-lg text-xs space-y-1">
                     <div className="font-semibold text-slate-500 dark:text-slate-400 font-mono tabular-nums">
@@ -226,7 +363,9 @@ export function RevenueAnalyticsSection({
                     </div>
                     <div className="flex items-center justify-between gap-4 tabular-nums">
                       <span className="text-slate-600 dark:text-slate-300">
-                        {isBn ? '৩০ দিনের মোট:' : '30D Cumulative:'}
+                        {isBn
+                          ? `${periodDays} দিনের মোট:`
+                          : `${periodDays}D Cumulative:`}
                       </span>
                       <span className="font-semibold text-slate-900 dark:text-white">
                         {formatTk(pt.cumulativeFee)}
@@ -259,7 +398,7 @@ export function RevenueAnalyticsSection({
               stroke={strokeColor}
               strokeWidth={2.5}
               fill={`url(#${gradientId})`}
-              dot={false}
+              dot={points.length <= 14 ? { r: 3, fill: strokeColor } : false}
               activeDot={{
                 r: 5,
                 fill: strokeColor,
@@ -272,10 +411,21 @@ export function RevenueAnalyticsSection({
       </div>
 
       {summary.totalFeeIncome === 0 && (
-        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
-          {isBn
-            ? 'গত ৩০ দিনে এখনো কোনো এস্ক্রো ফি সেটেল হয়নি। ডিল সম্পন্ন হয়ে পেআউট রিলিজ হওয়ার সাথে সাথে দৈনিক আয় এখানে যুক্ত হবে।'
-            : 'No escrow fee settlements recorded in the last 30 days yet. Daily fee earnings appear automatically as escrow payouts are released.'}
+        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <span>
+            {isBn
+              ? `${activeStart} থেকে ${activeEnd} সময়সীমায় কোনো এস্ক্রো ফি সেটেলমেন্ট পাওয়া যায়নি।`
+              : `No escrow fee settlements recorded between ${activeStart} and ${activeEnd}.`}
+          </span>
+          {preset !== 'all' && (
+            <button
+              type="button"
+              onClick={() => handleSelectPreset('all')}
+              className="self-start sm:self-auto px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold rounded-lg whitespace-nowrap transition-colors"
+            >
+              {isBn ? 'সর্বমোট ডাটা দেখুন' : 'View All Time'}
+            </button>
+          )}
         </div>
       )}
     </section>

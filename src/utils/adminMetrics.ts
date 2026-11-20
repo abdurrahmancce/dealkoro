@@ -394,13 +394,16 @@ export function computeDailyAdminFeeTrend(
   return points;
 }
 
-export interface ThirtyDayRevenuePoint extends DailyRevenuePoint {
+export interface RevenueAnalyticsPoint extends DailyRevenuePoint {
   cumulativeFee: number;
 }
 
-export interface ThirtyDayRevenueSummary {
+export type ThirtyDayRevenuePoint = RevenueAnalyticsPoint;
+
+export interface RevenueAnalyticsSummary {
   startDate: string;
   endDate: string;
+  dayCount: number;
   totalFeeIncome: number;
   totalDealVolume: number;
   totalSettlements: number;
@@ -414,6 +417,8 @@ export interface ThirtyDayRevenueSummary {
   } | null;
 }
 
+export type ThirtyDayRevenueSummary = RevenueAnalyticsSummary;
+
 export function compute30DayAdminFeeTrend(
   statements: StatementEntry[],
   referenceDate: Date = new Date()
@@ -421,21 +426,22 @@ export function compute30DayAdminFeeTrend(
   return computeDailyAdminFeeTrend(statements, undefined, referenceDate);
 }
 
-export function compute30DayRevenueAnalytics(
+export function computeRevenueAnalytics(
   statements: StatementEntry[],
+  range?: { startDate?: string; endDate?: string },
   referenceDate: Date = new Date()
 ): {
-  points: ThirtyDayRevenuePoint[];
-  summary: ThirtyDayRevenueSummary;
+  points: RevenueAnalyticsPoint[];
+  summary: RevenueAnalyticsSummary;
 } {
-  const basePoints = compute30DayAdminFeeTrend(statements, referenceDate);
+  const basePoints = computeDailyAdminFeeTrend(statements, range, referenceDate);
   let runningFee = 0;
   let totalDealVolume = 0;
   let totalSettlements = 0;
   let activeDays = 0;
-  let peakDay: ThirtyDayRevenueSummary['peakDay'] = null;
+  let peakDay: RevenueAnalyticsSummary['peakDay'] = null;
 
-  const points: ThirtyDayRevenuePoint[] = basePoints.map((pt) => {
+  const points: RevenueAnalyticsPoint[] = basePoints.map((pt) => {
     runningFee += pt.releasedFee;
     totalDealVolume += pt.dealVolume;
     totalSettlements += pt.entryCount;
@@ -462,6 +468,7 @@ export function compute30DayRevenueAnalytics(
     summary: {
       startDate: points[0]?.dateKey ?? '',
       endDate: points[points.length - 1]?.dateKey ?? '',
+      dayCount,
       totalFeeIncome: runningFee,
       totalDealVolume,
       totalSettlements,
@@ -470,6 +477,16 @@ export function compute30DayRevenueAnalytics(
       peakDay,
     },
   };
+}
+
+export function compute30DayRevenueAnalytics(
+  statements: StatementEntry[],
+  referenceDate: Date = new Date()
+): {
+  points: ThirtyDayRevenuePoint[];
+  summary: ThirtyDayRevenueSummary;
+} {
+  return computeRevenueAnalytics(statements, undefined, referenceDate);
 }
 
 export function computeAdminDashboardMetrics(params: {
